@@ -27,14 +27,20 @@ type Metrics struct {
 	DiskHealthStatus  string  `json:"disk_health_status"`
 	DiskTemperatureC  float64 `json:"disk_temperature_c"`
 	Timestamp         string  `json:"timestamp"`
+	// Network diagnostics
+	GatewayReachable   bool   `json:"gateway_reachable"`
+	DNSWorking         bool   `json:"dns_working"`
+	InternetReachable  bool   `json:"internet_reachable"`
+	DefaultGateway     string `json:"default_gateway"`
 }
 
-// NetworkInfo represents current network state.
+// NetworkInfo represents current network state including diagnostics.
 type NetworkInfo struct {
-	WifiSSID        string   `json:"wifi_ssid"`
-	WifiSignalDBm   int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps float64 `json:"network_speed_mbps"`
-	IPAddresses     []string `json:"ip_addresses"`
+	WifiSSID         string      `json:"wifi_ssid"`
+	WifiSignalDBm    int         `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64     `json:"network_speed_mbps"`
+	IPAddresses      []string    `json:"ip_addresses"`
+	Diag             NetworkDiag `json:"diag"`
 }
 
 // RegistrationInfo is sent once on agent startup.
@@ -96,22 +102,12 @@ func CollectMetrics() Metrics {
 		uptimeSec = u
 	}
 
-	// Network status
-	netStatus := "down"
-	netLatencyMs := 0.0
-	if connections, err := net.Connections("tcp"); err == nil && len(connections) > 0 {
-		netStatus = "up"
-		// Simple latency check: measure time to establish a TCP connection
-		netLatencyMs = measureLatency()
-	} else {
-		if ifaces, err := net.Interfaces(); err == nil {
-			for _, iface := range ifaces {
-				if len(iface.Flags) > 0 && iface.Flags[0] == "up" {
-					netStatus = "degraded"
-					break
-				}
-			}
-		}
+	// Network status — full diagnostic
+	diag := RunNetworkDiag()
+	netStatus := diag.Status
+	netLatencyMs := diag.InternetLatencyMs
+	if netLatencyMs == 0 {
+		netLatencyMs = diag.GatewayLatencyMs
 	}
 
 	// SMART disk health (platform-specific)
@@ -136,18 +132,23 @@ func CollectMetrics() Metrics {
 		DiskHealthStatus:  diskHealth,
 		DiskTemperatureC:  round(diskTemp),
 		Timestamp:         now,
+		GatewayReachable:  diag.GatewayReachable,
+		DNSWorking:        diag.DNSWorking,
+		InternetReachable: diag.InternetReachable,
+		DefaultGateway:    diag.DefaultGateway,
 	}
 }
 
-// CollectNetworkInfo gathers extended network information.
+// CollectNetworkInfo gathers extended network information including diagnostics.
 func CollectNetworkInfo() NetworkInfo {
-	info := NetworkInfo{
-		WifiSSID:        getWifiSSID(),
-		WifiSignalDBm:   getWifiSignal(),
+	diag := RunNetworkDiag()
+	return NetworkInfo{
+		WifiSSID:         getWifiSSID(),
+		WifiSignalDBm:    getWifiSignal(),
 		NetworkSpeedMbps: getNetworkSpeed(),
-		IPAddresses:     getIPAddresses(),
+		IPAddresses:      getIPAddresses(),
+		Diag:             diag,
 	}
-	return info
 }
 
 // BuildRegistration collects static system info for initial registration.
