@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// Location holds the result of an OS-level location lookup.
+type Location struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Accuracy  float64 `json:"accuracy_meters"`
+	Source    string  `json:"source"`
+}
+
 // GeoIPLocation holds the result of a GeoIP lookup.
 type GeoIPLocation struct {
 	Latitude  float64 `json:"latitude"`
