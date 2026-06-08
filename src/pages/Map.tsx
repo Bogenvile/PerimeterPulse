@@ -33,7 +33,7 @@ const MapPage = () => {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
       </div>
     );
   }
@@ -41,8 +41,8 @@ const MapPage = () => {
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <AlertCircle className="h-10 w-10 text-red-400" />
-        <p className="text-sm text-red-400">{error}</p>
+        <AlertCircle className="h-10 w-10 text-red-500" />
+        <p className="text-sm text-red-500">{error}</p>
       </div>
     );
   }
@@ -72,10 +72,10 @@ const MapPage = () => {
         />
         {selectedAsset && (
           <div className="absolute bottom-4 left-4 right-4 z-[1000] md:left-auto md:right-4 md:w-80">
-            <Card className="border-white/[0.08] bg-[hsl(222_47%_8%)]/95 p-4 backdrop-blur-md">
+            <Card className="border-border bg-card/95 p-4 backdrop-blur-md shadow-lg">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-semibold">{selectedAsset.hostname}</p>
+                  <p className="font-semibold text-foreground">{selectedAsset.hostname}</p>
                   <p className="text-xs text-muted-foreground">
                     {selectedAsset.os} • {selectedAsset.cpu_model}
                   </p>
@@ -95,7 +95,7 @@ const MapPage = () => {
                 </button>
                 <button
                   onClick={() => setSelectedAsset(null)}
-                  className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Close
                 </button>

@@ -73,7 +73,7 @@ const AssetsPage = () => {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
       </div>
     );
   }
@@ -81,8 +81,8 @@ const AssetsPage = () => {
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <AlertCircle className="h-10 w-10 text-red-400" />
-        <p className="text-sm text-red-400">{error}</p>
+        <AlertCircle className="h-10 w-10 text-red-500" />
+        <p className="text-sm text-red-500">{error}</p>
       </div>
     );
   }
@@ -103,7 +103,7 @@ const AssetsPage = () => {
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold">Assets</h1>
+          <h1 className="text-xl font-bold text-foreground">Assets</h1>
           <p className="text-sm text-muted-foreground">
             {filtered.length} of {assets.length} assets
           </p>
@@ -115,7 +115,7 @@ const AssetsPage = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search hostname, OS, WiFi, disk..."
-            className="w-56 rounded-lg border border-white/[0.08] bg-white/[0.03] py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none"
+            className="w-56 rounded-lg border border-input bg-background py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           />
         </div>
       </div>
@@ -127,8 +127,8 @@ const AssetsPage = () => {
             onClick={() => setStatusFilter(opt.value)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               statusFilter === opt.value
-                ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
-                : "border border-white/[0.06] text-muted-foreground hover:text-foreground hover:border-white/[0.12]"
+                ? "bg-blue-600/20 text-blue-600 dark:text-blue-400 border border-blue-500/30"
+                : "border border-border text-muted-foreground hover:text-foreground hover:border-foreground/20"
             }`}
           >
             {opt.label}
@@ -141,11 +141,11 @@ const AssetsPage = () => {
           <Card
             key={asset.id}
             onClick={() => navigate(`/assets/${asset.id}`)}
-            className="cursor-pointer border-white/[0.06] bg-white/[0.02] p-4 transition-all hover:bg-white/[0.04] hover:border-white/[0.1]"
+            className="cursor-pointer border-border bg-card p-4 shadow-sm transition-all hover:bg-muted/50 hover:border-foreground/10 hover:shadow-md"
           >
             <div className="flex items-start justify-between mb-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{asset.hostname}</p>
+                <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
                 <p className="text-xs text-muted-foreground">{asset.os} {asset.os_version}</p>
               </div>
               <AgentStatusBadge status={asset.status} showLabel={false} />
