@@ -1,46 +1,52 @@
-# ── Build stage ──────────────────────────────────────────────────────────────
+# ── Stage 1: Build frontend ──────────────────────────────────────────────
 FROM node:20-alpine AS builder
-
 WORKDIR /app
 
-# Copy package files & install dependencies
-COPY package.json package-lock.json* ./
-RUN npm ci
+# Copy package files & install all dependencies (dev included for build)
+COPY package.json ./
+RUN npm install
 
-# Copy semua source code proyek
+# Copy seluruh source code
 COPY . .
 
-# Build React frontend + Nitro server
+# Build frontend ke dist/
 RUN npm run build
 
-# ── Production stage ─────────────────────────────────────────────────────────
+# ── Stage 2: Production runtime ──────────────────────────────────────────
 FROM node:20-alpine AS runner
-
 WORKDIR /app
 
-# Buat grup dan user non-root terlebih dahulu demi keamanan
+# Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodeapp -u 1001 -G nodejs
 
-# Install production-only dependencies langsung dengan ownership nodeapp
-COPY --chown=nodeapp:nodejs package.json package-lock.json* ./
-RUN npm ci --omit=dev && npm cache clean --force
+# Copy package.json & install hanya production dependencies
+COPY --chown=nodeapp:nodejs package.json ./
+RUN npm install --omit=dev && npm cache clean --force
 
-# Salin hasil build dari stage builder dengan ownership nodeapp
-COPY --chown=nodeapp:nodejs --from=builder /app/dist ./dist
-COPY --chown=nodeapp:nodejs --from=builder /app/.output ./output
-COPY --chown=nodeapp:nodejs --from=builder /app/server ./server
-COPY --chown=nodeapp:nodejs --from=builder /app/nitro.config.ts ./
+# Copy hasil build dan server code dari builder
+COPY --from=builder --chown=nodeapp:nodejs /app/dist ./dist
+COPY --from=builder --chown=nodeapp:nodejs /app/server ./server
+COPY --from=builder --chown=nodeapp:nodejs /app/nitro.config.ts ./nitro.config.ts
+COPY --from=builder --chown=nodeapp:nodejs /app/vite.config.ts ./vite.config.ts
+COPY --from=builder --chown=nodeapp:nodejs /app/tailwind.config.ts ./tailwind.config.ts
+COPY --from=builder --chown=nodeapp:nodejs /app/postcss.config.js ./postcss.config.js
+COPY --from=builder --chown=nodeapp:nodejs /app/components.json ./components.json
+COPY --from=builder --chown=nodeapp:nodejs /app/tsconfig.json ./tsconfig.json
+COPY --from=builder --chown=nodeapp:nodejs /app/tsconfig.app.json ./tsconfig.app.json
+COPY --from=builder --chown=nodeapp:nodejs /app/tsconfig.node.json ./tsconfig.node.json
+COPY --from=builder --chown=nodeapp:nodejs /app/index.html ./index.html
 
-# Pindah ke user non-root sebelum aplikasi dijalankan
-USER nodeapp
+# Copy public assets
+COPY --from=builder --chown=nodeapp:nodejs /app/public ./public
 
-# Ekspos port aplikasi
+# Set environment
+ENV NODE_ENV=production
+ENV NITRO_PORT=3000
+
 EXPOSE 3000
 
-# Health check untuk memastikan container berjalan normal
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+USER nodeapp
 
-# Jalankan Nitro server
-CMD ["node", "output/server/index.mjs"]
+# Jalankan Nitro server (production mode)
+CMD ["node", "dist/index.mjs"]
