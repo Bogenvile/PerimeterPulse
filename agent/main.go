@@ -1,25 +1,9 @@
-// PerimeterPulse Agent v2
-// Cross-platform health & location monitor for Windows and Linux (Lubuntu).
-//
-// Extended collection includes:
-//   - WiFi SSID & signal strength
-//   - IP addresses & network interface speed
-//   - SMART disk health & temperature
-//   - CPU core count
-//
-// Compiles to a single static binary:
-//
-//	go build -ldflags="-s -w" -o pulse-agent .
-//
-// Usage:
-//
-//	pulse-agent --server https://your-server.com --apikey ppulse-sk-xxxx --hostname MY-PC
-
 package main
 
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -31,128 +15,121 @@ import (
 	"github.com/perimeterpulse/agent/collector"
 )
 
-var (
-	serverURL string
-	apiKey    string
-	hostname  string
-	osName    string
-	osVersion string
-	agentVer  = "2.0.0"
-	batchFile = "pulse_buffer.json"
-)
-
 func main() {
-	flag.StringVar(&serverURL, "server", "https://localhost:8080", "PerimeterPulse server URL")
-	flag.StringVar(&apiKey, "apikey", "", "API key for authentication")
-	flag.StringVar(&hostname, "hostname", "", "Hostname override")
-	flag.StringVar(&osName, "os", "", "OS name override")
-	flag.StringVar(&osVersion, "os-version", "", "OS version override")
+	serverURL := flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
+	apiKey := flag.String("apikey", "", "API key for the server")
+	hostname := flag.String("hostname", "", "Override hostname (default: OS hostname)")
 	flag.Parse()
 
-	if apiKey == "" {
+	if *apiKey == "" {
 		log.Fatal("--apikey is required")
 	}
+	if *serverURL == "" {
+		log.Fatal("--server is required")
+	}
 
-	if hostname == "" {
-		h, err := os.Hostname()
+	apiClient := client.NewClient(*serverURL, *apiKey)
+	buf := buffer.NewBuffer(apiClient)
+
+	// Determine hostname
+	host := *hostname
+	if host == "" {
+		var err error
+		host, err = os.Hostname()
 		if err != nil {
-			log.Fatalf("Failed to get hostname: %v", err)
+			log.Fatalf("unable to get hostname: %v", err)
 		}
-		hostname = h
 	}
 
-	log.Printf("PerimeterPulse Agent v%s starting on %s", agentVer, hostname)
-	log.Printf("Server: %s", serverURL)
+	// Collect system info for registration
+	sysInfo := collector.CollectSystemInfo(host)
 
-	cli := client.New(serverURL, apiKey)
-	buf := buffer.New(batchFile)
-
-	// Register with extended info
-	regPayload := collector.BuildRegistration(hostname, osName, osVersion, agentVer)
-	agentID, err := cli.Register(regPayload)
+	// Register the agent (retries handled inside the client)
+	agentID, err := apiClient.Register(sysInfo)
 	if err != nil {
-		log.Printf("Registration failed (will retry in heartbeat): %v", err)
-		agentID = buf.LoadAgentID()
-	} else {
-		log.Printf("Registered as agent %s", agentID)
-		buf.SaveAgentID(agentID)
+		log.Printf("WARNING: registration failed: %v", err)
+		log.Println("Continuing without registration — heartbeat will retry later")
+		agentID = "unknown"
 	}
+	log.Printf("Agent ID: %s", agentID)
 
-	// Graceful shutdown
+	// Start flushing buffered data
+	buf.Start(agentID)
+
+	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Flush buffered data on startup
-	flushBuffered(cli, buf)
-
-	// Run first collection immediately
-	collectAndSend(cli, buf, agentID)
-
-	// Main loop — every 60 seconds
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
+
+	log.Println("Agent started, sending heartbeat every 60s")
+	log.Println("Press Ctrl+C to stop")
+
+	// Immediate first heartbeat
+	collectAndSend(agentID, apiClient)
 
 	for {
 		select {
 		case <-ticker.C:
-			collectAndSend(cli, buf, agentID)
+			collectAndSend(agentID, apiClient)
 		case sig := <-sigCh:
-			log.Printf("Received %v, shutting down...", sig)
-			flushBuffered(cli, buf)
+			log.Printf("Received signal %v, shutting down", sig)
+			buf.Stop()
 			return
 		}
 	}
 }
 
-func collectAndSend(cli *client.Client, buf *buffer.Buffer, agentID string) {
-	metrics := collector.CollectMetrics()
-	loc := collector.CollectLocation()
-	netInfo := collector.CollectNetworkInfo()
+func collectAndSend(agentID string, apiClient *client.Client) {
+	// Collect metrics
+	metrics, err := collector.CollectMetrics()
+	if err != nil {
+		log.Printf("ERROR collecting metrics: %v", err)
+		return
+	}
+
+	// Collect location
+	loc, err := collector.CollectLocation()
+	if err != nil {
+		log.Printf("WARNING collecting location: %v", err)
+		// location is optional — continue without it
+	}
+
+	// Collect network info
+	netInfo, err := collector.CollectNetworkInfo()
+	if err != nil {
+		log.Printf("WARNING collecting network info: %v", err)
+	}
+
+	// Collect disk health (SMART)
+	diskHealth, err := collector.CollectDiskHealth()
+	if err != nil {
+		log.Printf("WARNING collecting disk health: %v", err)
+	}
 
 	payload := client.HeartbeatPayload{
-		AgentID:     agentID,
-		APIKey:      cli.APIKey(),
-		Metrics:     metrics,
-		Location:    loc,
-		NetworkInfo: netInfo,
+		AgentID: agentID,
+		Metrics: &metrics,
+		NetworkInfo: &netInfo,
 	}
 
-	err := cli.SendHeartbeat(payload)
-	if err != nil {
-		log.Printf("Heartbeat failed: %v (buffering %d bytes)", err, len(batchFile))
-		buf.Append(payload)
-		return
-	}
-
-	log.Printf("Heartbeat OK: CPU=%.1f%% RAM=%.1f%% Disk=%s/%s WiFi=%s Loc=(%.4f,%.4f)",
-		metrics.CPUPercent,
-		metrics.RAMPercent,
-		metrics.DiskHealthStatus,
-		netInfo.WifiSSID,
-		loc.Latitude,
-		loc.Longitude,
-	)
-}
-
-func flushBuffered(cli *client.Client, buf *buffer.Buffer) {
-	items := buf.Flush()
-	if len(items) == 0 {
-		return
-	}
-
-	log.Printf("Flushing %d buffered payloads...", len(items))
-	success := 0
-	for _, item := range items {
-		var payload client.HeartbeatPayload
-		if err := json.Unmarshal(item, &payload); err != nil {
-			continue
-		}
-		payload.APIKey = cli.APIKey()
-		if err := cli.SendHeartbeat(payload); err != nil {
-			buf.AppendRaw(item)
-		} else {
-			success++
+	if loc != nil {
+		payload.Location = &client.LocationData{
+			Latitude:       loc.Latitude,
+			Longitude:      loc.Longitude,
+			AccuracyMeters: loc.AccuracyMeters,
+			Source:         loc.Source,
 		}
 	}
-	log.Printf("Flushed %d/%d payloads", success, len(items))
+
+	if diskHealth != nil {
+		payload.Metrics.DiskHealthStatus = &diskHealth.Status
+		payload.Metrics.DiskTemperatureC = diskHealth.TemperatureCelsius
+	}
+
+	// Send heartbeat (buffered if offline)
+	if err := apiClient.SendHeartbeat(payload); err != nil {
+		log.Printf("ERROR sending heartbeat: %v", err)
+	}
 }
