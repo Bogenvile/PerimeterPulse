@@ -1,111 +1,76 @@
-version: "3.9"
-
-# ============================================================
-# PerimeterPulse — Self-Hosted Deployment (MySQL + InfluxDB)
-#
-# Setup:
-#   1. cp .env.example .env (edit if needed)
-#   2. docker compose up -d
-#   3. Init MySQL schema:
-#      docker compose exec -T mysql mysql -u perimeterpulse -pperimeterpulse perimeterpulse < server/db/schema.mysql.sql
-#   4. Seed default users (password hashes):
-#      docker compose exec mysql mysql -u perimeterpulse -pperimeterpulse perimeterpulse -e "
-#        UPDATE users SET password_hash='\$2a\$10\$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy' WHERE username='admin';
-#        UPDATE users SET password_hash='\$2a\$10\$RkL9J8f2Qm5Ht0XZJNmwXe5Gq.KdL9p2WzC1jV9bH3sU6yA4fT8oO' WHERE username='viewer';
-#      "
-#   5. Create API key:
-#      Use the dashboard (admin login) → API Keys section or run:
-#      docker compose exec backend node -e "
-#        const bcrypt = require('bcryptjs');
-#        const mysql = require('mysql2/promise');
-#        (async()=>{
-#          const c=await mysql.createConnection({host:'mysql',user:'perimeterpulse',password:'perimeterpulse',database:'perimeterpulse'});
-#          const raw='ppulse-sk-a1b2c3d4e5f6g7h8';
-#          await c.execute('INSERT INTO api_keys(key_prefix,key_hash,label) VALUES(?,?,?)',['ppulse-s',bcrypt.hashSync(raw,10),'Default']);
-#          console.log('API Key:',raw);
-#          await c.end();
-#        })();
-#      "
-# ============================================================
+version: '3.8'
 
 services:
+  # ── DATABASE METADATA: MYSQL ────────────────────────────────────────────────
   mysql:
     image: mysql:8.4
     container_name: perimeterpulse-mysql
-    restart: unless-stopped
+    restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-perimeterpulse}
-      MYSQL_USER: ${MYSQL_USER:-perimeterpulse}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-perimeterpulse}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
-      - mysqldata:/var/lib/mysql
-      - ./server/db/schema.mysql.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - mysql_data:/var/lib/mysql
+      # Otomatis mengeksekusi schema SQL saat database pertama kali dibuat
+      - ./server/db/schema.mysql.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "perimeterpulse", "-pperimeterpulse"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - pulse-net
 
+  # ── DATABASE METRICS: INFLUXDB ──────────────────────────────────────────────
   influxdb:
     image: influxdb:2.7-alpine
     container_name: perimeterpulse-influxdb
-    restart: unless-stopped
+    restart: always
     environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USER:-admin}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:-perimeterpulse}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-perimeterpulse}
-      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-perimeterpulse}
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-perimeterpulse-token}
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUX_USER}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUX_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUX_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUX_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}
     ports:
       - "8086:8086"
     volumes:
-      - influxdata:/var/lib/influxdb2
+      - influxdb_data:/var/lib/influxdb2
     healthcheck:
-      test: ["CMD", "influx", "ping"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8086/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - pulse-net
 
+  # ── BACKEND & DASHBOARD: NITRO SERVER ───────────────────────────────────────
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: perimeterpulse-backend
-    restart: unless-stopped
-    environment:
-      MYSQL_HOST: mysql
-      MYSQL_PORT: "3306"
-      MYSQL_USER: ${MYSQL_USER:-perimeterpulse}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-perimeterpulse}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-perimeterpulse}
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: ${INFLUX_TOKEN:-perimeterpulse-token}
-      INFLUXDB_ORG: ${INFLUX_ORG:-perimeterpulse}
-      INFLUXDB_BUCKET: ${INFLUX_BUCKET:-perimeterpulse}
-      NITRO_PORT: "3000"
-      NITRO_JWT_SECRET: ${NITRO_JWT_SECRET:-perimeterpulse-jwt-secret-change-in-production}
+    restart: always
     ports:
       - "3000:3000"
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUX_TOKEN}
+      - INFLUXDB_ORG=${INFLUX_ORG}
+      - INFLUXDB_BUCKET=${INFLUX_BUCKET}
+      - NITRO_JWT_SECRET=${NITRO_JWT_SECRET}
     depends_on:
       mysql:
         condition: service_healthy
       influxdb:
         condition: service_healthy
-    networks:
-      - pulse-net
 
 volumes:
-  mysqldata:
-  influxdata:
-
-networks:
-  pulse-net:
-    driver: bridge
+  mysql_data:
+  influxdb_data:
