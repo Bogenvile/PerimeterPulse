@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # ── DATABASE METADATA & TIME-SERIES: MYSQL ─────────────────────────────────
+  # ── DATABASE: MYSQL ──────────────────────────────────────────────────────
   mysql:
     image: mysql:8.4
     container_name: perimeterpulse-mysql
@@ -22,7 +22,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── BACKEND & DASHBOARD: NITRO SERVER ───────────────────────────────────────
+  # ── BACKEND & DASHBOARD: NITRO SERVER ────────────────────────────────────
   backend:
     build:
       context: .
