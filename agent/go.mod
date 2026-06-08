@@ -2,9 +2,7 @@ module github.com/perimeterpulse/agent
 
 go 1.21
 
-require (
-	github.com/shirou/gopsutil/v3 v3.23.9
-)
+require github.com/shirou/gopsutil/v3 v3.23.9
 
 require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
