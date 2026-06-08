@@ -20,7 +20,7 @@ function formatBytes(bytes: number): string {
 }
 
 function wifiSignalLabel(dbm: number | null): { text: string; color: string } {
-  if (dbm === null || dbm === 0) return { text: "N/A", color: "text-muted-foreground" };
+  if (dbm === null || dbm === 0 || dbm === -999) return { text: "No signal", color: "text-muted-foreground" };
   if (dbm >= -50) return { text: "Excellent", color: "text-emerald-400" };
   if (dbm >= -65) return { text: "Good", color: "text-blue-400" };
   if (dbm >= -75) return { text: "Fair", color: "text-amber-400" };
@@ -154,13 +154,13 @@ const AssetDetailPage = () => {
           </div>
           <p className="text-sm font-semibold truncate">{asset.disk_model || "Unknown"}</p>
           <p className="text-xs">
-            {asset.disk_type} •{" "}
+            {asset.disk_type || "unknown"} •{" "}
             <span className={
               asset.disk_health_status === "ok" ? "text-emerald-400" :
               asset.disk_health_status === "warning" ? "text-amber-400" :
               asset.disk_health_status === "critical" ? "text-red-400" : "text-muted-foreground"
             }>
-              {asset.disk_health_status}
+              {asset.disk_health_status || "unknown"}
             </span>
           </p>
         </Card>
@@ -178,9 +178,9 @@ const AssetDetailPage = () => {
           </div>
           <p className="text-sm font-semibold truncate">{asset.wifi_ssid || "N/A"}</p>
           <p className={`text-xs ${signalInfo.color}`}>
-            {asset.wifi_signal_dbm != null
+            {asset.wifi_signal_dbm != null && asset.wifi_signal_dbm !== -999
               ? `${asset.wifi_signal_dbm} dBm (${signalInfo.text})`
-              : "No WiFi"}
+              : signalInfo.text}
           </p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">

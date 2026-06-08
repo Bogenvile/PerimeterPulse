@@ -34,6 +34,11 @@ function formatLastSeen(iso: string | null): string {
   return `${days}d ago`;
 }
 
+function formatWifiSignal(dbm: number | null): string {
+  if (dbm === null || dbm === 0 || dbm === -999) return "No signal";
+  return `${dbm} dBm`;
+}
+
 const AssetsPage = () => {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -163,14 +168,14 @@ const AssetsPage = () => {
                 <span>Disk</span>
                 <span className="text-foreground">
                   {asset.disk_type}{" "}
-                  {asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
+                  {asset.disk_health_status && asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span>WiFi</span>
                 <span className="text-foreground truncate ml-2 max-w-[100px]" title={asset.wifi_ssid}>
                   {asset.wifi_ssid || "N/A"}
-                  {asset.wifi_signal_dbm != null && ` (${asset.wifi_signal_dbm} dBm)`}
+                  {asset.wifi_signal_dbm != null && ` (${formatWifiSignal(asset.wifi_signal_dbm)})`}
                 </span>
               </div>
               <div className="flex justify-between">
