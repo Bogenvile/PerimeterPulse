@@ -7,7 +7,6 @@ export function getPool(): mysql.Pool {
   if (!pool) {
     const url = process.env.DATABASE_URL || "";
     if (url) {
-      // Parse mysql://user:pass@host:port/db format
       const parsed = new URL(url);
       pool = mysql.createPool({
         host: parsed.hostname || "localhost",
@@ -76,4 +75,111 @@ export function parseJsonArray(val: unknown): string[] {
     }
   }
   return [];
+}
+
+// ──── Time-Series: Agent Metrics ────
+
+interface MetricsInput {
+  cpu_percent: number;
+  ram_percent: number;
+  ram_used_bytes: number;
+  ram_total_bytes: number;
+  storage_percent: number;
+  storage_used_bytes: number;
+  storage_total_bytes: number;
+  uptime_seconds: number;
+  network_status: string;
+  network_latency_ms: number;
+  gateway_reachable?: boolean;
+  dns_working?: boolean;
+  internet_reachable?: boolean;
+  default_gateway?: string;
+  disk_health_status?: string;
+  disk_temperature_c?: number;
+  timestamp: string;
+}
+
+export async function insertMetrics(agentId: string, m: MetricsInput): Promise<void> {
+  await query(
+    `INSERT INTO agent_metrics
+      (agent_id, cpu_percent, ram_percent, ram_used_bytes, ram_total_bytes,
+       storage_percent, storage_used_bytes, storage_total_bytes,
+       uptime_seconds, network_status, network_latency_ms,
+       gateway_reachable, dns_working, internet_reachable, default_gateway,
+       disk_health_status, disk_temperature_c, recorded_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      agentId,
+      m.cpu_percent, m.ram_percent, m.ram_used_bytes, m.ram_total_bytes,
+      m.storage_percent, m.storage_used_bytes, m.storage_total_bytes,
+      m.uptime_seconds, m.network_status, m.network_latency_ms,
+      m.gateway_reachable ?? null, m.dns_working ?? null, m.internet_reachable ?? null,
+      m.default_gateway ?? null,
+      m.disk_health_status ?? null, m.disk_temperature_c ?? null,
+      m.timestamp ? new Date(m.timestamp) : new Date(),
+    ],
+  );
+}
+
+export async function queryMetrics(
+  agentId: string,
+  hours: number,
+): Promise<Record<string, unknown>[]> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT
+       recorded_at AS time,
+       cpu_percent, ram_percent, storage_percent,
+       network_status, network_latency_ms,
+       disk_health_status, disk_temperature_c
+     FROM agent_metrics
+     WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+     ORDER BY recorded_at ASC`,
+    [agentId, hours],
+  );
+  return rows.map((r) => ({
+    ...r,
+    time: r.time instanceof Date ? r.time.toISOString() : r.time,
+  }));
+}
+
+// ──── Time-Series: Agent Location ────
+
+interface LocationInput {
+  latitude: number;
+  longitude: number;
+  accuracy_meters: number;
+  source: string;
+  timestamp: string;
+}
+
+export async function insertLocation(agentId: string, loc: LocationInput): Promise<void> {
+  await query(
+    `INSERT INTO agent_locations
+      (agent_id, latitude, longitude, accuracy_meters, source, recorded_at)
+     VALUES (?,?,?,?,?,?)`,
+    [
+      agentId,
+      loc.latitude, loc.longitude, loc.accuracy_meters, loc.source,
+      loc.timestamp ? new Date(loc.timestamp) : new Date(),
+    ],
+  );
+}
+
+export async function queryLocations(
+  agentId: string,
+  hours: number,
+): Promise<Record<string, unknown>[]> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT
+       recorded_at AS time,
+       latitude, longitude, accuracy_meters, source
+     FROM agent_locations
+     WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+     ORDER BY recorded_at ASC`,
+    [agentId, hours],
+  );
+  return rows.map((r) => ({
+    ...r,
+    time: r.time instanceof Date ? r.time.toISOString() : r.time,
+  }));
 }
