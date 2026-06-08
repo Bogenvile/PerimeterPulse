@@ -101,7 +101,7 @@ func (b *Buffer) flush() {
 			remaining = append(remaining, line)
 			continue
 		}
-		payload.APIKey = b.client.APIKey // inject current key
+		payload.APIKey = b.client.APIKey() // inject current key
 		if err := b.client.SendHeartbeat(payload); err != nil {
 			log.Printf("Buffer retry failed: %v", err)
 			remaining = append(remaining, line)

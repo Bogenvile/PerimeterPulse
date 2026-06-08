@@ -36,6 +36,9 @@ type LocationData struct {
 	Timestamp      string  `json:"timestamp"`
 }
 
+// APIKey returns the configured API key.
+func (c *Client) APIKey() string { return c.apiKey }
+
 // NewClient creates a new PerimeterPulse API client.
 func NewClient(serverURL, apiKey string) *Client {
 	return &Client{
