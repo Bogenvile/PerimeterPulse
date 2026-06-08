@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/perimeterpulse/agent/collector"
 )
 
 // Client handles HTTPS communication with the PerimeterPulse server.
@@ -18,23 +20,11 @@ type Client struct {
 
 // HeartbeatPayload is the JSON body sent to POST /api/agent/heartbeat
 type HeartbeatPayload struct {
-	AgentID  string      `json:"agent_id"`
-	APIKey   string      `json:"api_key"`
-	Metrics  interface{} `json:"metrics"`
-	Location interface{} `json:"location"`
-}
-
-// RegistrationPayload is the JSON body sent to POST /api/agent/register
-type RegistrationPayload struct {
-	Hostname         string   `json:"hostname"`
-	OS               string   `json:"os"`
-	OSVersion        string   `json:"os_version"`
-	AgentVersion     string   `json:"agent_version"`
-	APIKey           string   `json:"api_key"`
-	MACAddresses     []string `json:"mac_addresses"`
-	CPUModel         string   `json:"cpu_model"`
-	RAMTotalBytes    uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64  `json:"storage_total_bytes"`
+	AgentID     string                    `json:"agent_id"`
+	APIKey      string                    `json:"api_key"`
+	Metrics     collector.Metrics         `json:"metrics"`
+	Location    collector.Location        `json:"location"`
+	NetworkInfo collector.NetworkInfo     `json:"network_info"`
 }
 
 // New creates a new API client.
@@ -54,8 +44,7 @@ func (c *Client) APIKey() string {
 }
 
 // Register sends the agent registration payload.
-// Returns the assigned agent_id from the server.
-func (c *Client) Register(payload RegistrationPayload) (string, error) {
+func (c *Client) Register(payload collector.RegistrationInfo) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("register marshal: %w", err)
@@ -87,7 +76,7 @@ func (c *Client) Register(payload RegistrationPayload) (string, error) {
 	return result.AgentID, nil
 }
 
-// SendHeartbeat sends a metrics + location heartbeat to the server.
+// SendHeartbeat sends a metrics + location + network heartbeat to the server.
 func (c *Client) SendHeartbeat(payload HeartbeatPayload) error {
 	body, err := json.Marshal(payload)
 	if err != nil {

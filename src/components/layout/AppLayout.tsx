@@ -1,15 +1,18 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Map,
   Monitor,
   Radio,
-  Settings,
+  LogOut,
+  User,
   Key,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { setApiKey } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { setApiToken } from "@/lib/api";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -18,16 +21,19 @@ const navItems = [
 ];
 
 export function AppLayout() {
-  const [keyInput, setKeyInput] = useState("");
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [keySet, setKeySet] = useState(false);
+  const { user, token, isAdmin, logout } = useAuth();
+  const navigate = useNavigate();
+  const [showApiKeys, setShowApiKeys] = useState(false);
 
-  function handleSetKey() {
-    if (keyInput.trim()) {
-      setApiKey(keyInput.trim());
-      setKeySet(true);
-      setShowKeyInput(false);
-    }
+  // Keep the API client in sync with auth token
+  if (token) {
+    setApiToken(token);
+  }
+
+  function handleLogout() {
+    logout();
+    setApiToken(null);
+    navigate("/login");
   }
 
   return (
@@ -35,7 +41,10 @@ export function AppLayout() {
       {/* Sidebar */}
       <aside className="hidden w-56 flex-shrink-0 border-r border-white/[0.06] bg-[hsl(222_47%_4%)] md:flex md:flex-col">
         {/* Logo */}
-        <div className="flex h-14 items-center gap-2.5 border-b border-white/[0.06] px-4">
+        <div
+          className="flex cursor-pointer items-center gap-2.5 border-b border-white/[0.06] px-4 h-14"
+          onClick={() => navigate("/")}
+        >
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
             <Radio className="h-4 w-4 text-white" />
           </div>
@@ -64,45 +73,52 @@ export function AppLayout() {
               {item.label}
             </NavLink>
           ))}
+
+          {isAdmin && (
+            <>
+              <div className="my-3 border-t border-white/[0.06]" />
+              <button
+                onClick={() => setShowApiKeys(!showApiKeys)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  showApiKeys
+                    ? "bg-blue-600/15 text-blue-400"
+                    : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
+                )}
+              >
+                <Key className="h-4 w-4" />
+                API Keys
+              </button>
+            </>
+          )}
         </nav>
 
-        {/* Bottom section */}
-        <div className="border-t border-white/[0.06] p-3">
-          {!keySet ? (
-            <div>
-              {showKeyInput ? (
-                <div className="space-y-2">
-                  <input
-                    type="password"
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                    placeholder="Enter API key..."
-                    className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none"
-                  />
-                  <button
-                    onClick={handleSetKey}
-                    className="w-full rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                  >
-                    Set Key
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowKeyInput(true)}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-white/[0.04] hover:text-foreground transition-colors"
-                >
-                  <Key className="h-4 w-4" />
-                  Set API Key
-                </button>
-              )}
+        {/* User section */}
+        {user && (
+          <div className="border-t border-white/[0.06] p-3">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600/20">
+                <User className="h-3.5 w-3.5 text-blue-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-xs font-medium">
+                  {user.display_name || user.username}
+                </p>
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {isAdmin && <Shield className="h-2.5 w-2.5" />}
+                  {user.role}
+                </p>
+              </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-emerald-400">
-              <div className="h-2 w-2 rounded-full bg-emerald-500" />
-              API Connected
-            </div>
-          )}
-        </div>
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign Out
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Mobile header */}
@@ -114,42 +130,24 @@ export function AppLayout() {
               Perimeter<span className="text-blue-400">Pulse</span>
             </span>
           </div>
-          <div className="hidden md:block">
+          <div className="hidden md:flex items-center gap-3">
             <h2 className="text-sm font-medium text-muted-foreground">
               IT Infrastructure Monitoring
             </h2>
           </div>
           <div className="flex items-center gap-3">
-            {!keySet && (
+            {user && (
               <button
-                onClick={() => setShowKeyInput(!showKeyInput)}
-                className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-muted-foreground hover:text-red-400 transition-colors md:hidden"
               >
-                <Key className="h-3.5 w-3.5" />
-                API Key
+                <LogOut className="h-3.5 w-3.5" />
+                Sign Out
               </button>
-            )}
-            {showKeyInput && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  placeholder="API key..."
-                  className="w-36 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none"
-                />
-                <button
-                  onClick={handleSetKey}
-                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
-                >
-                  Save
-                </button>
-              </div>
             )}
           </div>
         </header>
 
-        {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

@@ -8,39 +8,55 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
 )
 
 // Metrics represents a snapshot of system health.
 type Metrics struct {
-	CPUPercent       float64 `json:"cpu_percent"`
-	RAMPercent       float64 `json:"ram_percent"`
-	RAMUsedBytes     uint64  `json:"ram_used_bytes"`
-	RAMTotalBytes    uint64  `json:"ram_total_bytes"`
-	StoragePercent   float64 `json:"storage_percent"`
-	StorageUsedBytes uint64  `json:"storage_used_bytes"`
-	StorageTotalBytes uint64 `json:"storage_total_bytes"`
-	UptimeSeconds    uint64  `json:"uptime_seconds"`
-	NetworkStatus    string  `json:"network_status"`
-	NetworkLatencyMs float64 `json:"network_latency_ms"`
-	Timestamp        string  `json:"timestamp"`
+	CPUPercent        float64 `json:"cpu_percent"`
+	RAMPercent        float64 `json:"ram_percent"`
+	RAMUsedBytes      uint64  `json:"ram_used_bytes"`
+	RAMTotalBytes     uint64  `json:"ram_total_bytes"`
+	StoragePercent    float64 `json:"storage_percent"`
+	StorageUsedBytes  uint64  `json:"storage_used_bytes"`
+	StorageTotalBytes uint64  `json:"storage_total_bytes"`
+	UptimeSeconds     uint64  `json:"uptime_seconds"`
+	NetworkStatus     string  `json:"network_status"`
+	NetworkLatencyMs  float64 `json:"network_latency_ms"`
+	DiskHealthStatus  string  `json:"disk_health_status"`
+	DiskTemperatureC  float64 `json:"disk_temperature_c"`
+	Timestamp         string  `json:"timestamp"`
+}
+
+// NetworkInfo represents current network state.
+type NetworkInfo struct {
+	WifiSSID        string   `json:"wifi_ssid"`
+	WifiSignalDBm   int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64 `json:"network_speed_mbps"`
+	IPAddresses     []string `json:"ip_addresses"`
 }
 
 // RegistrationInfo is sent once on agent startup.
 type RegistrationInfo struct {
-	Hostname         string   `json:"hostname"`
-	OS               string   `json:"os"`
-	OSVersion        string   `json:"os_version"`
-	AgentVersion     string   `json:"agent_version"`
-	MACAddresses     []string `json:"mac_addresses"`
-	CPUModel         string   `json:"cpu_model"`
-	RAMTotalBytes    uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64  `json:"storage_total_bytes"`
+	Hostname          string   `json:"hostname"`
+	OS                string   `json:"os"`
+	OSVersion         string   `json:"os_version"`
+	AgentVersion      string   `json:"agent_version"`
+	MACAddresses      []string `json:"mac_addresses"`
+	IPAddresses       []string `json:"ip_addresses"`
+	CPUModel          string   `json:"cpu_model"`
+	CPUCores          int      `json:"cpu_cores"`
+	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	DiskModel         string   `json:"disk_model"`
+	DiskType          string   `json:"disk_type"`
+	WifiSSID          string   `json:"wifi_ssid"`
+	WifiSignalDBm     int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps  float64  `json:"network_speed_mbps"`
 }
 
-// CollectMetrics gathers all system health metrics.
+// CollectMetrics gathers all system health metrics including SMART disk data.
 func CollectMetrics() Metrics {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -80,20 +96,14 @@ func CollectMetrics() Metrics {
 		uptimeSec = u
 	}
 
-	// Network status (check if any interface is up and has an IP)
+	// Network status
 	netStatus := "down"
 	netLatencyMs := 0.0
 	if connections, err := net.Connections("tcp"); err == nil && len(connections) > 0 {
 		netStatus = "up"
-		// Approximate latency via load average as a proxy
-		if l, err := load.Avg(); err == nil {
-			netLatencyMs = l.Load1 * 100 // rough correlation
-			if netLatencyMs > 2000 {
-				netLatencyMs = 2000
-			}
-		}
+		// Simple latency check: measure time to establish a TCP connection
+		netLatencyMs = measureLatency()
 	} else {
-		// Check if any interface has an IP address
 		if ifaces, err := net.Interfaces(); err == nil {
 			for _, iface := range ifaces {
 				if len(iface.Flags) > 0 && iface.Flags[0] == "up" {
@@ -102,6 +112,14 @@ func CollectMetrics() Metrics {
 				}
 			}
 		}
+	}
+
+	// SMART disk health (platform-specific)
+	diskHealth := "unknown"
+	diskTemp := 0.0
+	if smart, err := collectSMARTData(); err == nil {
+		diskHealth = smart.Status
+		diskTemp = smart.Temperature
 	}
 
 	return Metrics{
@@ -115,8 +133,21 @@ func CollectMetrics() Metrics {
 		UptimeSeconds:     uptimeSec,
 		NetworkStatus:     netStatus,
 		NetworkLatencyMs:  round(netLatencyMs),
+		DiskHealthStatus:  diskHealth,
+		DiskTemperatureC:  round(diskTemp),
 		Timestamp:         now,
 	}
+}
+
+// CollectNetworkInfo gathers extended network information.
+func CollectNetworkInfo() NetworkInfo {
+	info := NetworkInfo{
+		WifiSSID:        getWifiSSID(),
+		WifiSignalDBm:   getWifiSignal(),
+		NetworkSpeedMbps: getNetworkSpeed(),
+		IPAddresses:     getIPAddresses(),
+	}
+	return info
 }
 
 // BuildRegistration collects static system info for initial registration.
@@ -130,20 +161,33 @@ func BuildRegistration(hostname, osName, osVersion, agentVer string) Registratio
 		}
 	}
 
-	// MAC addresses
+	// MAC + IP addresses
 	var macs []string
+	var ips []string
 	if ifaces, err := net.Interfaces(); err == nil {
 		for _, iface := range ifaces {
 			if iface.HardwareAddr != "" && iface.HardwareAddr != "00:00:00:00:00:00" {
 				macs = append(macs, iface.HardwareAddr)
 			}
+			for _, addr := range iface.Addrs {
+				if ip := addr.Addr; ip != "" && ip != "127.0.0.1" && ip != "::1" {
+					ips = append(ips, ip)
+				}
+			}
 		}
 	}
 
-	// CPU model
+	// CPU model + cores
 	cpuModel := ""
+	cpuCores := 0
 	if info, err := cpu.Info(); err == nil && len(info) > 0 {
 		cpuModel = info[0].ModelName
+		cpuCores = int(info[0].Cores)
+	}
+	if cpuCores == 0 {
+		if c, err := cpu.Counts(true); err == nil {
+			cpuCores = c
+		}
 	}
 
 	// RAM total
@@ -152,7 +196,7 @@ func BuildRegistration(hostname, osName, osVersion, agentVer string) Registratio
 		ramTotal = v.Total
 	}
 
-	// Storage total
+	// Storage + disk info
 	storageTotal := uint64(0)
 	rootPath := "/"
 	if runtime.GOOS == "windows" {
@@ -162,16 +206,41 @@ func BuildRegistration(hostname, osName, osVersion, agentVer string) Registratio
 		storageTotal = usage.Total
 	}
 
+	diskModel, diskType := getDiskInfo()
+
+	// Network info
+	wifiSSID := getWifiSSID()
+	wifiSignal := getWifiSignal()
+	netSpeed := getNetworkSpeed()
+
 	return RegistrationInfo{
-		Hostname:         hostname,
-		OS:               osName,
-		OSVersion:        osVersion,
-		AgentVersion:     agentVer,
-		MACAddresses:     macs,
-		CPUModel:         cpuModel,
-		RAMTotalBytes:    ramTotal,
+		Hostname:          hostname,
+		OS:                osName,
+		OSVersion:         osVersion,
+		AgentVersion:      agentVer,
+		MACAddresses:      macs,
+		IPAddresses:       ips,
+		CPUModel:          cpuModel,
+		CPUCores:          cpuCores,
+		RAMTotalBytes:     ramTotal,
 		StorageTotalBytes: storageTotal,
+		DiskModel:         diskModel,
+		DiskType:          diskType,
+		WifiSSID:          wifiSSID,
+		WifiSignalDBm:     wifiSignal,
+		NetworkSpeedMbps:  netSpeed,
 	}
+}
+
+// SMARTData holds parsed SMART disk information.
+type SMARTData struct {
+	Status      string
+	Temperature float64
+}
+
+// collectSMARTData is implemented in platform-specific files.
+func collectSMARTData() (*SMARTData, error) {
+	return collectSMART()
 }
 
 func round(v float64) float64 {

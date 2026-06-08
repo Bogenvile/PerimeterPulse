@@ -1,7 +1,16 @@
 import { useEffect, useRef, useCallback } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { Asset } from "@/lib/types";
+import type { AgentStatus } from "@/lib/types";
+
+interface MappableAsset {
+  id: string;
+  hostname: string;
+  os: string;
+  status: AgentStatus;
+  last_location_lat: number | null;
+  last_location_lng: number | null;
+}
 
 // Fix default Leaflet icon paths
 import iconUrl from "leaflet/dist/images/marker-icon.png";
@@ -37,8 +46,8 @@ function createMarkerIcon(status: string) {
 }
 
 interface MapViewProps {
-  assets: Asset[];
-  onAssetClick?: (asset: Asset) => void;
+  assets: MappableAsset[];
+  onAssetClick?: (asset: MappableAsset) => void;
   center?: [number, number];
   zoom?: number;
   className?: string;
@@ -56,7 +65,7 @@ export function MapView({
   const markersRef = useRef<L.Marker[]>([]);
 
   const handleAssetClick = useCallback(
-    (asset: Asset) => {
+    (asset: MappableAsset) => {
       if (onAssetClick) onAssetClick(asset);
     },
     [onAssetClick],

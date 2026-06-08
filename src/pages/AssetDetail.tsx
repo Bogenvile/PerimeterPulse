@@ -8,54 +8,73 @@ import {
   ArrowLeft,
   Cpu,
   HardDrive,
-  Clock,
   Wifi,
-  Laptop,
   Monitor,
+  Laptop,
+  Network,
+  Thermometer,
+  Disc,
+  Signal,
+  EthernetPort,
 } from "lucide-react";
-import type { Asset, MetricsDataPoint, LocationDataPoint } from "@/lib/types";
+import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint } from "@/lib/types";
 
-// Mock asset registry
-const mockAssets: Record<string, Asset> = {
+const mockAssets: Record<string, ExtendedAsset> = {
   "1": {
     id: "1", agent_id: "agent-a1b2c3d4", hostname: "FACTORY-EDGE-01",
-    os: "Windows 11", os_version: "10.0.22631", agent_version: "1.0.0",
-    mac_addresses: ["00:1A:2B:3C:4D:5E"], cpu_model: "Intel Core i7-13700",
+    os: "Windows 11", os_version: "10.0.22631", agent_version: "2.0.0",
+    mac_addresses: ["00:1A:2B:3C:4D:5E"], ip_addresses: ["192.168.1.101", "fe80::1a2b"],
+    cpu_model: "Intel Core i7-13700", cpu_cores: 16,
     ram_total_bytes: 17179869184, storage_total_bytes: 512110190592,
+    disk_model: "Samsung 990 Pro 1TB", disk_type: "NVMe",
+    disk_health_status: "ok", disk_temperature_c: 42,
+    wifi_ssid: "Factory-Net-5G", wifi_signal_dbm: -48, network_speed_mbps: 1000,
     status: "online", last_seen_at: new Date().toISOString(),
     last_location_lat: 40.7128, last_location_lng: -74.006,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   },
   "2": {
     id: "2", agent_id: "agent-e5f6g7h8", hostname: "WAREHOUSE-T1",
-    os: "Lubuntu", os_version: "22.04 LTS", agent_version: "1.0.0",
-    mac_addresses: ["00:2B:3C:4D:5E:6F"], cpu_model: "Intel Celeron N5100",
+    os: "Lubuntu", os_version: "22.04 LTS", agent_version: "2.0.0",
+    mac_addresses: ["00:2B:3C:4D:5E:6F"], ip_addresses: ["10.0.0.55"],
+    cpu_model: "Intel Celeron N5100", cpu_cores: 4,
     ram_total_bytes: 4294967296, storage_total_bytes: 128849018880,
+    disk_model: "WD Blue SA510", disk_type: "SSD",
+    disk_health_status: "warning", disk_temperature_c: 55,
+    wifi_ssid: "Warehouse-WiFi", wifi_signal_dbm: -72, network_speed_mbps: 100,
     status: "warning", last_seen_at: new Date(Date.now() - 120000).toISOString(),
     last_location_lat: 34.0522, last_location_lng: -118.2437,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   },
   "3": {
     id: "3", agent_id: "agent-i9j0k1l2", hostname: "REMOTE-KIOSK-03",
-    os: "Windows 10", os_version: "10.0.19045", agent_version: "1.0.0",
-    mac_addresses: ["00:3C:4D:5E:6F:7G"], cpu_model: "AMD Ryzen 5 5600G",
+    os: "Windows 10", os_version: "10.0.19045", agent_version: "2.0.0",
+    mac_addresses: ["00:3C:4D:5E:6F:7G"], ip_addresses: ["172.16.0.10"],
+    cpu_model: "AMD Ryzen 5 5600G", cpu_cores: 6,
     ram_total_bytes: 8589934592, storage_total_bytes: 256060514304,
+    disk_model: "Seagate Barracuda 256GB", disk_type: "HDD",
+    disk_health_status: "ok", disk_temperature_c: 37,
+    wifi_ssid: "", wifi_signal_dbm: null, network_speed_mbps: 0,
     status: "offline", last_seen_at: new Date(Date.now() - 86400000).toISOString(),
     last_location_lat: 51.5074, last_location_lng: -0.1278,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   },
   "4": {
     id: "4", agent_id: "agent-m3n4o5p6", hostname: "SHIPPING-T2",
-    os: "Lubuntu", os_version: "22.04 LTS", agent_version: "1.0.0",
-    mac_addresses: ["00:4D:5E:6F:7G:8H"], cpu_model: "Intel Atom x5-Z8350",
+    os: "Lubuntu", os_version: "22.04 LTS", agent_version: "2.0.0",
+    mac_addresses: ["00:4D:5E:6F:7G:8H"], ip_addresses: ["10.0.0.88"],
+    cpu_model: "Intel Atom x5-Z8350", cpu_cores: 4,
     ram_total_bytes: 2147483648, storage_total_bytes: 64424509440,
+    disk_model: "Kingston A400", disk_type: "SSD",
+    disk_health_status: "ok", disk_temperature_c: 39,
+    wifi_ssid: "Shipping-WiFi", wifi_signal_dbm: -55, network_speed_mbps: 100,
     status: "online", last_seen_at: new Date().toISOString(),
     last_location_lat: 48.8566, last_location_lng: 2.3522,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   },
 };
 
-function generateMockMetrics(): MetricsDataPoint[] {
+function generateMockMetrics(diskHealth?: string, diskTemp?: number | null): MetricsDataPoint[] {
   const points: MetricsDataPoint[] = [];
   const now = Date.now();
   for (let i = 60; i >= 0; i--) {
@@ -67,6 +86,8 @@ function generateMockMetrics(): MetricsDataPoint[] {
       storage_percent: 55 + (i / 60) * 0.5,
       network_status: "up",
       network_latency_ms: 15 + Math.random() * 35,
+      disk_health_status: diskHealth || "ok",
+      disk_temperature_c: diskTemp ?? (35 + Math.random() * 5),
     });
   }
   return points;
@@ -96,13 +117,12 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+function wifiSignalLabel(dbm: number | null): { text: string; color: string } {
+  if (dbm === null || dbm === 0) return { text: "N/A", color: "text-muted-foreground" };
+  if (dbm >= -50) return { text: "Excellent", color: "text-emerald-400" };
+  if (dbm >= -65) return { text: "Good", color: "text-blue-400" };
+  if (dbm >= -75) return { text: "Fair", color: "text-amber-400" };
+  return { text: "Weak", color: "text-red-400" };
 }
 
 const AssetDetailPage = () => {
@@ -111,16 +131,17 @@ const AssetDetailPage = () => {
   const [timeRange, setTimeRange] = useState("-1h");
 
   const asset = id ? mockAssets[id] : null;
-  const metrics = useMemo(() => generateMockMetrics(), []);
+  const metrics = useMemo(
+    () => generateMockMetrics(asset?.disk_health_status, asset?.disk_temperature_c),
+    [asset?.disk_health_status, asset?.disk_temperature_c],
+  );
   const locations = useMemo(() => generateMockLocations(), []);
 
   if (!asset) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-8">
         <Monitor className="mb-4 h-12 w-12 text-muted-foreground opacity-30" />
-        <p className="text-lg font-medium text-muted-foreground">
-          Asset not found
-        </p>
+        <p className="text-lg font-medium text-muted-foreground">Asset not found</p>
         <button
           onClick={() => navigate("/assets")}
           className="mt-3 text-sm text-blue-400 hover:text-blue-300 transition-colors"
@@ -138,6 +159,8 @@ const AssetDetailPage = () => {
     { label: "7d", value: "-7d" },
   ];
 
+  const signalInfo = wifiSignalLabel(asset.wifi_signal_dbm);
+
   return (
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
       {/* Back + Title */}
@@ -154,7 +177,7 @@ const AssetDetailPage = () => {
             <AgentStatusBadge status={asset.status} />
           </div>
           <p className="text-sm text-muted-foreground">
-            {asset.os} {asset.os_version} • Agent {asset.agent_version} •{" "}
+            {asset.os} {asset.os_version} • Agent v{asset.agent_version} •{" "}
             <code className="text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">
               {asset.agent_id}
             </code>
@@ -162,7 +185,7 @@ const AssetDetailPage = () => {
         </div>
       </div>
 
-      {/* Hardware specs */}
+      {/* Hardware specs — 2 rows */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -170,32 +193,91 @@ const AssetDetailPage = () => {
             <span className="text-xs">CPU</span>
           </div>
           <p className="text-sm font-semibold">{asset.cpu_model}</p>
+          <p className="text-xs text-muted-foreground">{asset.cpu_cores} cores</p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <HardDrive className="h-4 w-4" />
             <span className="text-xs">RAM</span>
           </div>
-          <p className="text-sm font-semibold">
-            {formatBytes(asset.ram_total_bytes)}
-          </p>
+          <p className="text-sm font-semibold">{formatBytes(asset.ram_total_bytes)}</p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <HardDrive className="h-4 w-4" />
+            <Disc className="h-4 w-4" />
             <span className="text-xs">Storage</span>
           </div>
-          <p className="text-sm font-semibold">
-            {formatBytes(asset.storage_total_bytes)}
-          </p>
+          <p className="text-sm font-semibold">{formatBytes(asset.storage_total_bytes)}</p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Laptop className="h-4 w-4" />
-            <span className="text-xs">MAC Address</span>
+            <span className="text-xs">MAC / IP</span>
           </div>
           <p className="text-xs font-mono font-semibold truncate">
-            {asset.mac_addresses.join(", ")}
+            {asset.mac_addresses[0] || "N/A"}
+          </p>
+          <p className="text-xs text-muted-foreground truncate">
+            {asset.ip_addresses[0] || "N/A"}
+          </p>
+        </Card>
+      </div>
+
+      {/* Disk & Network details */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Disc className="h-4 w-4" />
+            <span className="text-xs">Disk Model</span>
+          </div>
+          <p className="text-sm font-semibold truncate">{asset.disk_model || "Unknown"}</p>
+          <p className="text-xs text-muted-foreground">
+            {asset.disk_type} • Health:{" "}
+            <span
+              className={
+                asset.disk_health_status === "ok"
+                  ? "text-emerald-400"
+                  : asset.disk_health_status === "warning"
+                    ? "text-amber-400"
+                    : asset.disk_health_status === "critical"
+                      ? "text-red-400"
+                      : "text-muted-foreground"
+              }
+            >
+              {asset.disk_health_status}
+            </span>
+          </p>
+        </Card>
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Thermometer className="h-4 w-4" />
+            <span className="text-xs">Disk Temp</span>
+          </div>
+          <p className="text-sm font-semibold">
+            {asset.disk_temperature_c != null ? `${asset.disk_temperature_c}°C` : "N/A"}
+          </p>
+        </Card>
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Wifi className="h-4 w-4" />
+            <span className="text-xs">WiFi</span>
+          </div>
+          <p className="text-sm font-semibold truncate">{asset.wifi_ssid || "N/A"}</p>
+          <p className={`text-xs ${signalInfo.color}`}>
+            {asset.wifi_signal_dbm != null
+              ? `${asset.wifi_signal_dbm} dBm (${signalInfo.text})`
+              : "No WiFi"}
+          </p>
+        </Card>
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <EthernetPort className="h-4 w-4" />
+            <span className="text-xs">Link Speed</span>
+          </div>
+          <p className="text-sm font-semibold">
+            {asset.network_speed_mbps > 0
+              ? `${asset.network_speed_mbps} Mbps`
+              : "N/A"}
           </p>
         </Card>
       </div>
@@ -221,39 +303,19 @@ const AssetDetailPage = () => {
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <h3 className="mb-3 text-sm font-semibold">CPU Usage</h3>
-          <MetricsChart
-            data={metrics}
-            metric="cpu_percent"
-            color="#60a5fa"
-            height={200}
-          />
+          <MetricsChart data={metrics} metric="cpu_percent" color="#60a5fa" height={200} />
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <h3 className="mb-3 text-sm font-semibold">RAM Usage</h3>
-          <MetricsChart
-            data={metrics}
-            metric="ram_percent"
-            color="#a78bfa"
-            height={200}
-          />
+          <MetricsChart data={metrics} metric="ram_percent" color="#a78bfa" height={200} />
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <h3 className="mb-3 text-sm font-semibold">Storage Usage</h3>
-          <MetricsChart
-            data={metrics}
-            metric="storage_percent"
-            color="#fbbf24"
-            height={200}
-          />
+          <MetricsChart data={metrics} metric="storage_percent" color="#fbbf24" height={200} />
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <h3 className="mb-3 text-sm font-semibold">Network Latency</h3>
-          <MetricsChart
-            data={metrics}
-            metric="network_latency_ms"
-            color="#34d399"
-            height={200}
-          />
+          <MetricsChart data={metrics} metric="network_latency_ms" color="#34d399" height={200} />
         </Card>
       </div>
 

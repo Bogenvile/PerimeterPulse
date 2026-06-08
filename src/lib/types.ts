@@ -1,8 +1,27 @@
+// ──── User & Auth Types ────
+
+export type UserRole = "admin" | "viewer";
+
+export interface User {
+  id: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface LoginResponse {
+  token: string;
+  user: User;
+}
+
 // ──── Agent & Asset Types ────
 
 export type AgentStatus = "online" | "offline" | "warning" | "critical";
 
-export interface AgentMetrics {
+export interface ExtendedAgentMetrics {
   cpu_percent: number;
   ram_percent: number;
   ram_used_bytes: number;
@@ -13,7 +32,9 @@ export interface AgentMetrics {
   uptime_seconds: number;
   network_status: "up" | "down" | "degraded";
   network_latency_ms: number;
-  timestamp: string; // ISO 8601
+  disk_health_status: "ok" | "warning" | "critical" | "unknown";
+  disk_temperature_c: number;
+  timestamp: string;
 }
 
 export interface AgentLocation {
@@ -24,25 +45,38 @@ export interface AgentLocation {
   timestamp: string;
 }
 
-export interface AgentHeartbeatPayload {
+export interface ExtendedHeartbeatPayload {
   agent_id: string;
   api_key: string;
-  metrics: AgentMetrics;
+  metrics: ExtendedAgentMetrics;
   location: AgentLocation;
+  network_info: {
+    wifi_ssid: string;
+    wifi_signal_dbm: number;
+    network_speed_mbps: number;
+    ip_addresses: string[];
+  };
 }
 
-export interface AgentRegistrationPayload {
+export interface ExtendedRegistrationPayload {
   hostname: string;
   os: string;
   os_version: string;
   agent_version: string;
   mac_addresses: string[];
+  ip_addresses: string[];
   cpu_model: string;
+  cpu_cores: number;
   ram_total_bytes: number;
   storage_total_bytes: number;
+  disk_model: string;
+  disk_type: "SSD" | "HDD" | "NVMe" | "unknown";
+  wifi_ssid: string;
+  wifi_signal_dbm: number;
+  network_speed_mbps: number;
 }
 
-export interface Asset {
+export interface ExtendedAsset {
   id: string;
   agent_id: string;
   hostname: string;
@@ -50,9 +84,18 @@ export interface Asset {
   os_version: string;
   agent_version: string;
   mac_addresses: string[];
+  ip_addresses: string[];
   cpu_model: string;
+  cpu_cores: number;
   ram_total_bytes: number;
   storage_total_bytes: number;
+  disk_model: string;
+  disk_type: string;
+  disk_health_status: string;
+  disk_temperature_c: number | null;
+  wifi_ssid: string;
+  wifi_signal_dbm: number | null;
+  network_speed_mbps: number;
   status: AgentStatus;
   last_seen_at: string | null;
   last_location_lat: number | null;
@@ -68,6 +111,8 @@ export interface MetricsDataPoint {
   storage_percent: number;
   network_status: string;
   network_latency_ms: number;
+  disk_health_status?: string;
+  disk_temperature_c?: number;
 }
 
 export interface LocationDataPoint {
@@ -85,4 +130,14 @@ export interface DashboardStats {
   critical_count: number;
   avg_cpu_percent: number;
   avg_ram_percent: number;
+  disk_issues: number;
+}
+
+export interface ApiKeyInfo {
+  id: string;
+  key_prefix: string;
+  label: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
 }
