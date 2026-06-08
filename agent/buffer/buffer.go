@@ -4,124 +4,139 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/perimeterpulse/agent/client"
 )
 
-// Buffer provides offline buffering. When the agent cannot reach the server,
-// payloads are appended to a local JSON file. When connectivity is restored,
-// buffered payloads are flushed and sent to the server.
+// Buffer stores failed heartbeats to a local JSONL file and retries them.
 type Buffer struct {
+	client   *client.Client
 	filePath string
 	mu       sync.Mutex
+	stopCh   chan struct{}
+	agentID  string
 }
 
-// New creates a new Buffer backed by the given file path.
-func New(filePath string) *Buffer {
-	return &Buffer{filePath: filePath}
+// NewBuffer creates a new offline buffer.
+func NewBuffer(c *client.Client) *Buffer {
+	dir, err := os.Getwd()
+	if err != nil {
+		dir = "."
+	}
+	return &Buffer{
+		client:   c,
+		filePath: filepath.Join(dir, "pulse_buffer.jsonl"),
+		stopCh:   make(chan struct{}),
+	}
 }
 
-// Append serializes a payload and appends it to the buffer file.
-// The buffer format is one JSON object per line (JSONL).
-func (b *Buffer) Append(payload interface{}) {
+// Start begins the background retry loop.
+func (b *Buffer) Start(agentID string) {
+	b.agentID = agentID
+	go b.retryLoop()
+	log.Printf("Buffer started (%s)", b.filePath)
+}
+
+// Stop gracefully stops the buffer.
+func (b *Buffer) Stop() {
+	close(b.stopCh)
+	log.Println("Buffer stopped")
+}
+
+// Save persists a failed payload to disk.
+func (b *Buffer) Save(payload client.HeartbeatPayload) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	f, err := os.OpenFile(b.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("Buffer: marshal error: %v", err)
-		return
+		return err
 	}
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
 
-	f, err := os.OpenFile(b.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		log.Printf("Buffer: open error: %v", err)
-		return
-	}
-	defer f.Close()
+func (b *Buffer) retryLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		log.Printf("Buffer: write error: %v", err)
+	for {
+		select {
+		case <-b.stopCh:
+			return
+		case <-ticker.C:
+			b.flush()
+		}
 	}
 }
 
-// AppendRaw appends raw JSON bytes to the buffer (used for re-buffering).
-func (b *Buffer) AppendRaw(data []byte) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	f, err := os.OpenFile(b.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		log.Printf("Buffer: open error: %v", err)
-		return
-	}
-	defer f.Close()
-
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		log.Printf("Buffer: write error: %v", err)
-	}
-}
-
-// Flush reads all buffered payloads, clears the file, and returns the items.
-// Each item is a raw JSON byte slice.
-func (b *Buffer) Flush() [][]byte {
+func (b *Buffer) flush() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	data, err := os.ReadFile(b.filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		log.Printf("Buffer: read error: %v", err)
-		return nil
+	if err != nil || len(data) == 0 {
+		return
 	}
 
-	// Clear the file
-	if err := os.Truncate(b.filePath, 0); err != nil {
-		log.Printf("Buffer: truncate error: %v", err)
-	}
+	// Parse lines and attempt to resend
+	lines := bytesSplit(data, '\n')
+	var remaining [][]byte
 
-	if len(data) == 0 {
-		return nil
-	}
-
-	// Split by newlines, skip empty lines
-	lines := splitLines(data)
-	var items [][]byte
 	for _, line := range lines {
-		if len(line) > 0 {
-			items = append(items, line)
+		if len(line) == 0 {
+			continue
+		}
+		var payload client.HeartbeatPayload
+		if err := json.Unmarshal(line, &payload); err != nil {
+			remaining = append(remaining, line)
+			continue
+		}
+		payload.APIKey = b.client.APIKey // inject current key
+		if err := b.client.SendHeartbeat(payload); err != nil {
+			log.Printf("Buffer retry failed: %v", err)
+			remaining = append(remaining, line)
+		} else {
+			log.Println("Buffer retry successful")
 		}
 	}
-	return items
-}
 
-// SaveAgentID persists the agent_id to a simple file so the agent can reuse it
-// after restarts even if registration hasn't completed.
-func (b *Buffer) SaveAgentID(agentID string) {
-	_ = os.WriteFile(b.filePath+".agentid", []byte(agentID), 0600)
-}
-
-// LoadAgentID reads a previously saved agent_id.
-func (b *Buffer) LoadAgentID() string {
-	data, err := os.ReadFile(b.filePath + ".agentid")
-	if err != nil {
-		return ""
+	// Write back remaining lines
+	if len(remaining) == 0 {
+		os.Remove(b.filePath)
+	} else {
+		f, err := os.Create(b.filePath)
+		if err != nil {
+			log.Printf("Buffer: cannot rewrite file: %v", err)
+			return
+		}
+		defer f.Close()
+		for _, line := range remaining {
+			f.Write(append(line, '\n'))
+		}
 	}
-	return string(data)
 }
 
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
+func bytesSplit(data []byte, sep byte) [][]byte {
+	var parts [][]byte
 	start := 0
 	for i, b := range data {
-		if b == '\n' {
-			lines = append(lines, data[start:i])
+		if b == sep {
+			parts = append(parts, data[start:i])
 			start = i + 1
 		}
 	}
 	if start < len(data) {
-		lines = append(lines, data[start:])
+		parts = append(parts, data[start:])
 	}
-	return lines
+	return parts
 }

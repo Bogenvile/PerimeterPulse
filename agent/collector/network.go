@@ -4,225 +4,122 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
-	"time"
-
-	psnet "github.com/shirou/gopsutil/v3/net"
 )
 
-// getWifiSSID returns the currently connected WiFi network name.
-func getWifiSSID() string {
-	switch runtime.GOOS {
-	case "windows":
-		return getWifiSSIDWindows()
-	case "linux":
-		return getWifiSSIDLinux()
-	default:
-		return ""
-	}
+// NetworkInfo holds WiFi / IP information.
+type NetworkInfo struct {
+	WiFiSSID        string   `json:"wifi_ssid"`
+	WiFiSignalDBM   int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64 `json:"network_speed_mbps"`
+	IPAddresses     []string `json:"ip_addresses"`
 }
 
-func getWifiSSIDWindows() string {
-	out, err := exec.Command("netsh", "wlan", "show", "interfaces").CombinedOutput()
-	if err != nil {
-		return ""
+// CollectNetworkInfo gathers WiFi SSID, signal strength, and local IPs.
+func CollectNetworkInfo() NetworkInfo {
+	info := NetworkInfo{}
+
+	// IP addresses
+	addrs, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.IsGlobalUnicast() {
+				info.IPAddresses = append(info.IPAddresses, ipnet.IP.String())
+			}
+		}
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+
+	// WiFi info (platform-specific)
+	if runtime.GOOS == "windows" {
+		info.WiFiSSID, info.WiFiSignalDBM = getWindowsWiFi()
+	} else {
+		info.WiFiSSID, info.WiFiSignalDBM = getLinuxWiFi()
+	}
+
+	if info.WiFiSignalDBM == 0 {
+		info.WiFiSignalDBM = -999 // sentinel for "no data"
+	}
+
+	info.NetworkSpeedMbps = 0
+	return info
+}
+
+func getWindowsWiFi() (string, int) {
+	// netsh wlan show interfaces
+	out, err := exec.Command("netsh", "wlan", "show", "interfaces").Output()
+	if err != nil {
+		return "", 0
+	}
+	lines := strings.Split(string(out), "\n")
+	ssid := ""
+	signal := 0
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "SSID") && !strings.Contains(trimmed, "BSSID") {
 			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
+				ssid = strings.TrimSpace(parts[1])
 			}
 		}
-	}
-	return ""
-}
-
-func getWifiSSIDLinux() string {
-	// Try iwgetid first (most reliable)
-	out, err := exec.Command("iwgetid", "-r").CombinedOutput()
-	if err == nil {
-		return strings.TrimSpace(string(out))
-	}
-
-	// Try iwconfig
-	out, err = exec.Command("iwconfig", "2>/dev/null").CombinedOutput()
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, "ESSID:") && !strings.Contains(line, "off/any") {
-				parts := strings.Split(line, "ESSID:")
-				if len(parts) > 1 {
-					ssid := strings.Trim(parts[1], ` "`)
-					if ssid != "" {
-						return ssid
-					}
-				}
-			}
-		}
-	}
-
-	// Try nmcli
-	out, err = exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi").CombinedOutput()
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.HasPrefix(line, "yes:") {
-				return strings.TrimPrefix(line, "yes:")
-			}
-		}
-	}
-
-	return ""
-}
-
-// getWifiSignal returns WiFi signal strength in dBm.
-func getWifiSignal() int {
-	switch runtime.GOOS {
-	case "windows":
-		return getWifiSignalWindows()
-	case "linux":
-		return getWifiSignalLinux()
-	default:
-		return 0
-	}
-}
-
-func getWifiSignalWindows() int {
-	out, err := exec.Command("netsh", "wlan", "show", "interfaces").CombinedOutput()
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.Contains(trimmed, "Signal") && strings.Contains(trimmed, "%") {
+		if strings.HasPrefix(trimmed, "Signal") {
 			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {
-				pctStr := strings.TrimSpace(strings.TrimSuffix(parts[1], "%"))
-				if pct, err := strconv.Atoi(pctStr); err == nil {
-					// Convert % to approximate dBm: -100 to -30 range
-					return -100 + (pct * 70 / 100)
+				sigStr := strings.TrimSpace(parts[1])
+				sigStr = strings.TrimSuffix(sigStr, "%")
+				if s, err := parseInt(sigStr); err == nil {
+					// Windows gives 0-100%; map to dBm roughly
+					signal = s*100/100 - 100 // rough mapping
 				}
 			}
 		}
 	}
-	return 0
+	return ssid, signal
 }
 
-func getWifiSignalLinux() int {
-	out, err := exec.Command("iwconfig", "2>/dev/null").CombinedOutput()
-	if err != nil {
-		return 0
+func getLinuxWiFi() (string, int) {
+	// iwgetid -r for SSID
+	out, err := exec.Command("iwgetid", "-r").Output()
+	ssid := ""
+	if err == nil {
+		ssid = strings.TrimSpace(string(out))
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, "Signal level") {
-			if idx := strings.Index(line, "Signal level="); idx >= 0 {
-				rest := line[idx+len("Signal level="):]
-				parts := strings.Fields(rest)
-				if len(parts) > 0 {
-					val := strings.TrimSpace(parts[0])
-					if d, err := strconv.Atoi(val); err == nil {
-						return d
+
+	// iwconfig for signal level
+	out2, err := exec.Command("iwconfig").Output()
+	signal := 0
+	if err == nil {
+		lines := strings.Split(string(out2), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "Signal level") {
+				parts := strings.Fields(line)
+				for i, p := range parts {
+					if strings.Contains(p, "Signal") && i+1 < len(parts) {
+						valStr := strings.TrimPrefix(parts[i+1], "level=")
+						if s, err := parseInt(valStr); err == nil {
+							signal = s
+						}
 					}
 				}
 			}
 		}
 	}
-	return 0
+
+	return ssid, signal
 }
 
-// getNetworkSpeed returns network interface speed in Mbps.
-func getNetworkSpeed() float64 {
-	if runtime.GOOS == "windows" {
-		return getNetworkSpeedWindows()
-	}
-	return getNetworkSpeedLinux()
-}
-
-func getNetworkSpeedWindows() float64 {
-	out, err := exec.Command(
-		"wmic", "nic", "where", "NetEnabled=true",
-		"get", "Speed", "/format:csv",
-	).CombinedOutput()
-	if err != nil {
-		return 0
-	}
-	maxSpeed := 0
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "Node,Speed") {
-			continue
+func parseInt(s string) (int, error) {
+	var n int
+	for _, c := range s {
+		if c == '-' && n == 0 {
+			continue // negative sign handled below
 		}
-		parts := strings.Split(line, ",")
-		if len(parts) >= 2 {
-			if speed, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
-				if speed > maxSpeed {
-					maxSpeed = speed
-				}
-			}
+		if c < '0' || c > '9' {
+			break
 		}
+		n = n*10 + int(c-'0')
 	}
-	// wmic returns bits per second, convert to Mbps
-	return float64(maxSpeed) / 1_000_000
-}
-
-func getNetworkSpeedLinux() float64 {
-	// Read from /sys/class/net/<iface>/speed
-	// Find the first active interface
-	ifaces, err := psnet.Interfaces()
-	if err != nil {
-		return 0
+	if strings.HasPrefix(s, "-") {
+		n = -n
 	}
-	for _, iface := range ifaces {
-		if iface.Name == "lo" || len(iface.Flags) == 0 {
-			continue
-		}
-		// gopsutil doesn't expose speed directly, use /sys/class/net
-		out, err := exec.Command(
-			"cat", "/sys/class/net/"+iface.Name+"/speed",
-		).CombinedOutput()
-		if err == nil {
-			if speed, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && speed > 0 {
-				return float64(speed)
-			}
-		}
-	}
-	return 0
-}
-
-// getIPAddresses returns all non-loopback IP addresses.
-func getIPAddresses() []string {
-	var ips []string
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ips
-	}
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipStr := addr.String()
-			// Strip subnet mask
-			if idx := strings.Index(ipStr, "/"); idx >= 0 {
-				ipStr = ipStr[:idx]
-			}
-			if ipStr != "" && ipStr != "127.0.0.1" && ipStr != "::1" && !strings.HasPrefix(ipStr, "fe80:") {
-				ips = append(ips, ipStr)
-			}
-		}
-	}
-	return ips
-}
-
-// measureLatency does a quick TCP dial to a well-known host to estimate latency.
-func measureLatency() float64 {
-	start := time.Now()
-	conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 3*time.Second)
-	if err != nil {
-		return 0
-	}
-	conn.Close()
-	return float64(time.Since(start).Milliseconds())
+	return n, nil
 }

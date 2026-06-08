@@ -1,205 +1,89 @@
 package collector
 
 import (
+	"log"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 )
 
-// collectSMART gathers disk health data via platform-specific tools.
-func collectSMART() (*SMARTData, error) {
-	switch runtime.GOOS {
-	case "windows":
-		return collectSMARTWindows()
-	case "linux":
-		return collectSMARTLinux()
-	default:
-		return &SMARTData{Status: "unknown"}, nil
-	}
+// DiskHealth holds SMART health status and optionally disk temperature.
+type DiskHealth struct {
+	Status            string   `json:"status"`
+	TemperatureCelsius *float64 `json:"temperature_celsius,omitempty"`
 }
 
-func collectSMARTWindows() (*SMARTData, error) {
-	// Use wmic to query disk drive status
-	out, err := exec.Command(
-		"wmic", "diskdrive",
-		"get", "Status,Model,MediaType",
-		"/format:csv",
-	).CombinedOutput()
-	if err != nil {
-		return &SMARTData{Status: "unknown"}, nil
-	}
-
-	status := "unknown"
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "Node,Model,Status") {
-			continue
-		}
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "ok") {
-			status = "ok"
-		} else if strings.Contains(lower, "pred fail") || strings.Contains(lower, "bad") {
-			status = "critical"
-		} else if strings.Contains(lower, "caution") {
-			status = "warning"
-		}
-	}
-
-	return &SMARTData{Status: status}, nil
-}
-
-func collectSMARTLinux() (*SMARTData, error) {
-	// Check if smartctl is available
-	if _, err := exec.LookPath("smartctl"); err != nil {
-		return &SMARTData{Status: "unknown"}, nil
-	}
-
-	// Find the system disk
-	diskDevice := findSystemDisk()
+// CollectDiskHealth queries SMART data via smartctl.
+// Returns nil if SMART is not available on this system.
+func CollectDiskHealth() *DiskHealth {
+	// Find the primary disk
+	diskDevice := getPrimaryDiskDevice()
 	if diskDevice == "" {
-		return &SMARTData{Status: "unknown"}, nil
+		log.Println("WARNING: could not determine primary disk device")
+		return nil
 	}
 
-	// Get SMART health status
-	out, err := exec.Command(
-		"smartctl", "-H", diskDevice,
-	).CombinedOutput()
+	args := []string{"-H", "-A", diskDevice}
+	if runtime.GOOS == "windows" {
+		args = []string{"-H", "-A", diskDevice, "-d", "ata"}
+	}
+
+	out, err := exec.Command("smartctl", args...).Output()
 	if err != nil {
-		return &SMARTData{Status: "unknown"}, nil
+		log.Printf("WARNING: smartctl failed for %s: %v", diskDevice, err)
+		return nil
 	}
 
-	status := "unknown"
+	health := &DiskHealth{Status: "unknown"}
 	output := string(out)
-	if strings.Contains(output, "PASSED") || strings.Contains(output, "OK") {
-		status = "ok"
-	} else if strings.Contains(output, "FAILED") || strings.Contains(output, "FAIL") {
-		status = "critical"
-	}
+	lines := strings.Split(output, "\n")
 
-	// Get temperature
-	temp := 0.0
-	tempOut, err := exec.Command(
-		"smartctl", "-A", diskDevice,
-	).CombinedOutput()
-	if err == nil {
-		for _, line := range strings.Split(string(tempOut), "\n") {
-			if strings.Contains(line, "Temperature_Celsius") ||
-				strings.Contains(line, "Temperature") {
-				fields := strings.Fields(line)
-				if len(fields) >= 10 {
-					// SMART attribute format: ID ATTRIBUTE_NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW_VALUE
-					if t, err := strconv.ParseFloat(fields[len(fields)-1], 64); err == nil {
-						temp = t
-					}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Overall health
+		if strings.Contains(trimmed, "SMART overall-health") || strings.Contains(trimmed, "SMART Health Status") {
+			if strings.Contains(strings.ToLower(trimmed), "passed") || strings.Contains(strings.ToLower(trimmed), "ok") {
+				health.Status = "ok"
+			} else if strings.Contains(strings.ToLower(trimmed), "warning") {
+				health.Status = "warning"
+			} else {
+				health.Status = "critical"
+			}
+		}
+		// Temperature (attribute 194 or Temperature_Celsius)
+		if strings.Contains(trimmed, "Temperature_Celsius") || strings.Contains(trimmed, "194") {
+			fields := strings.Fields(trimmed)
+			if len(fields) >= 10 {
+				// The RAW_VALUE is typically the last field
+				rawVal := fields[len(fields)-1]
+				if temp, err := strconv.ParseFloat(rawVal, 64); err == nil && temp > 0 && temp < 150 {
+					health.TemperatureCelsius = &temp
 				}
 			}
 		}
 	}
 
-	return &SMARTData{
-		Status:      status,
-		Temperature: temp,
-	}, nil
-}
-
-func findSystemDisk() string {
-	// Try common device names
-	candidates := []string{"/dev/sda", "/dev/nvme0n1", "/dev/vda", "/dev/sdb"}
-	for _, dev := range candidates {
-		out, err := exec.Command("smartctl", "-i", dev).CombinedOutput()
-		if err == nil && strings.Contains(string(out), "Device Model") {
-			return dev
-		}
+	if health.Status == "unknown" {
+		health.Status = "ok" // default to ok if we got output but couldn't parse
 	}
-	return ""
+
+	return health
 }
 
-// getDiskInfo returns the disk model and type (SSD/HDD/NVMe).
-func getDiskInfo() (model, diskType string) {
-	switch runtime.GOOS {
-	case "windows":
-		return getDiskInfoWindows()
-	case "linux":
-		return getDiskInfoLinux()
-	default:
-		return "", "unknown"
+func getPrimaryDiskDevice() string {
+	if runtime.GOOS == "windows" {
+		return "/dev/sda" // fallback; smartctl on Windows uses different naming
 	}
-}
-
-func getDiskInfoWindows() (string, string) {
-	out, err := exec.Command(
-		"wmic", "diskdrive",
-		"get", "Model,MediaType",
-		"/format:csv",
-	).CombinedOutput()
+	// Linux: find the root device
+	out, err := exec.Command("lsblk", "-no", "PKNAME", "/").Output()
 	if err != nil {
-		return "", "unknown"
+		// Fallback to /dev/sda
+		return "/dev/sda"
 	}
-	var model, mediaType string
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "Node,Model,MediaType") {
-			continue
-		}
-		// Skip header
-		parts := strings.Split(line, ",")
-		if len(parts) >= 3 {
-			model = strings.TrimSpace(parts[1])
-			mediaType = strings.TrimSpace(parts[2])
-			break
-		}
+	dev := strings.TrimSpace(string(out))
+	if dev != "" {
+		return "/dev/" + dev
 	}
-	dt := "unknown"
-	if strings.Contains(strings.ToLower(mediaType), "ssd") ||
-		strings.Contains(strings.ToLower(mediaType), "nvme") {
-		dt = "SSD"
-	} else if strings.Contains(strings.ToLower(mediaType), "hdd") ||
-		strings.Contains(strings.ToLower(mediaType), "fixed hard disk") {
-		dt = "HDD"
-	}
-	return model, dt
-}
-
-func getDiskInfoLinux() (string, string) {
-	diskDevice := findSystemDisk()
-	if diskDevice == "" {
-		return "", "unknown"
-	}
-
-	out, err := exec.Command("smartctl", "-i", diskDevice).CombinedOutput()
-	if err != nil {
-		return "", "unknown"
-	}
-
-	var model string
-	output := string(out)
-	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "Device Model") || strings.Contains(line, "Model Family") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				model = strings.TrimSpace(parts[1])
-			}
-		}
-	}
-
-	// Detect type
-	diskType := "unknown"
-	if strings.Contains(diskDevice, "nvme") {
-		diskType = "NVMe"
-	} else {
-		// Check rotation rate — 0 = SSD, >0 = HDD
-		rotOut, err := exec.Command(
-			"cat", "/sys/block/"+strings.TrimPrefix(diskDevice, "/dev/")+"/queue/rotational",
-		).CombinedOutput()
-		if err == nil {
-			if strings.TrimSpace(string(rotOut)) == "0" {
-				diskType = "SSD"
-			} else {
-				diskType = "HDD"
-			}
-		}
-	}
-
-	return model, diskType
+	return "/dev/sda"
 }

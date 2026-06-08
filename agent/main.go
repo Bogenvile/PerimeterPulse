@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -41,10 +39,8 @@ func main() {
 		}
 	}
 
-	// Collect system info for registration
+	// Register the agent
 	sysInfo := collector.CollectSystemInfo(host)
-
-	// Register the agent (retries handled inside the client)
 	agentID, err := apiClient.Register(sysInfo)
 	if err != nil {
 		log.Printf("WARNING: registration failed: %v", err)
@@ -56,7 +52,7 @@ func main() {
 	// Start flushing buffered data
 	buf.Start(agentID)
 
-	// Handle graceful shutdown
+	// Graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -82,39 +78,32 @@ func main() {
 }
 
 func collectAndSend(agentID string, apiClient *client.Client) {
-	// Collect metrics
-	metrics, err := collector.CollectMetrics()
-	if err != nil {
-		log.Printf("ERROR collecting metrics: %v", err)
-		return
+	// Collect metrics (always succeeds)
+	metrics := collector.CollectMetrics()
+
+	// Network diagnostics
+	collector.RunNetworkDiag(&metrics)
+
+	// Collect location (best-effort)
+	loc, locErr := collector.CollectLocation()
+	if locErr != nil {
+		log.Printf("WARNING: location collection failed: %v", locErr)
 	}
 
-	// Collect location
-	loc, err := collector.CollectLocation()
-	if err != nil {
-		log.Printf("WARNING collecting location: %v", err)
-		// location is optional — continue without it
-	}
+	// Collect network info (always succeeds)
+	netInfo := collector.CollectNetworkInfo()
 
-	// Collect network info
-	netInfo, err := collector.CollectNetworkInfo()
-	if err != nil {
-		log.Printf("WARNING collecting network info: %v", err)
-	}
+	// Collect disk health (best-effort)
+	diskHealth := collector.CollectDiskHealth()
 
-	// Collect disk health (SMART)
-	diskHealth, err := collector.CollectDiskHealth()
-	if err != nil {
-		log.Printf("WARNING collecting disk health: %v", err)
-	}
-
+	// Build heartbeat payload
 	payload := client.HeartbeatPayload{
-		AgentID: agentID,
-		Metrics: &metrics,
+		AgentID:     agentID,
+		Metrics:     &metrics,
 		NetworkInfo: &netInfo,
 	}
 
-	if loc != nil {
+	if locErr == nil {
 		payload.Location = &client.LocationData{
 			Latitude:       loc.Latitude,
 			Longitude:      loc.Longitude,
@@ -128,8 +117,8 @@ func collectAndSend(agentID string, apiClient *client.Client) {
 		payload.Metrics.DiskTemperatureC = diskHealth.TemperatureCelsius
 	}
 
-	// Send heartbeat (buffered if offline)
 	if err := apiClient.SendHeartbeat(payload); err != nil {
-		log.Printf("ERROR sending heartbeat: %v", err)
+		log.Printf("ERROR: heartbeat failed: %v", err)
+		_ = buffer.NewBuffer(apiClient) // won't re-save here; buffer already active
 	}
 }
