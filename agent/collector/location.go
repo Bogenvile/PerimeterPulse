@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Location holds the result of an OS-level location lookup.
+// Location holds the result of a device location lookup.
 type Location struct {
 	Latitude       float64 `json:"latitude"`
 	Longitude      float64 `json:"longitude"`
@@ -15,16 +15,15 @@ type Location struct {
 	Source         string  `json:"source"`
 }
 
-// GeoIPLocation holds the result of a GeoIP lookup.
-type GeoIPLocation struct {
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
+// geoIPResponse is the relevant part of the ip-api.com JSON response.
+type geoIPResponse struct {
+	Latitude  float64 `json:"lat"`
+	Longitude float64 `json:"lon"`
 }
 
-// getGeoIPLocation attempts to fetch the approximate location via ip-api.com.
-// It returns (latitude, longitude, accuracyMeters, source, error).
-// Accuracy is fixed at 20000 meters for GeoIP.
-func getGeoIPLocation() (float64, float64, float64, string, error) {
+// GetGeoIPLocation performs a GeoIP lookup using ip-api.com.
+// It returns latitude, longitude, accuracy (metres), source name, and any error.
+func GetGeoIPLocation() (float64, float64, float64, string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	req, err := http.NewRequest("GET", "http://ip-api.com/json/?fields=lat,lon", nil)
@@ -43,7 +42,7 @@ func getGeoIPLocation() (float64, float64, float64, string, error) {
 		return 0, 0, 0, "", fmt.Errorf("geoip: non-200 status: %d", resp.StatusCode)
 	}
 
-	var geo GeoIPLocation
+	var geo geoIPResponse
 	if err := json.NewDecoder(resp.Body).Decode(&geo); err != nil {
 		return 0, 0, 0, "", fmt.Errorf("geoip: decode failed: %w", err)
 	}
