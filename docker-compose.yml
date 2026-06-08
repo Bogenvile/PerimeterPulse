@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # ── DATABASE METADATA: MYSQL ────────────────────────────────────────────────
+  # ── DATABASE METADATA & TIME-SERIES: MYSQL ─────────────────────────────────
   mysql:
     image: mysql:8.4
     container_name: perimeterpulse-mysql
@@ -15,32 +15,9 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      # Otomatis mengeksekusi schema SQL saat database pertama kali dibuat
       - ./server/db/schema.mysql.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── DATABASE METRICS: INFLUXDB ──────────────────────────────────────────────
-  influxdb:
-    image: influxdb:2.7-alpine
-    container_name: perimeterpulse-influxdb
-    restart: always
-    environment:
-      - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUX_USER}
-      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUX_PASSWORD}
-      - DOCKER_INFLUXDB_INIT_ORG=${INFLUX_ORG}
-      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUX_BUCKET}
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}
-    ports:
-      - "8086:8086"
-    volumes:
-      - influxdb_data:/var/lib/influxdb2
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8086/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -60,17 +37,10 @@ services:
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_TOKEN=${INFLUX_TOKEN}
-      - INFLUXDB_ORG=${INFLUX_ORG}
-      - INFLUXDB_BUCKET=${INFLUX_BUCKET}
       - NITRO_JWT_SECRET=${NITRO_JWT_SECRET}
     depends_on:
       mysql:
         condition: service_healthy
-      influxdb:
-        condition: service_healthy
 
 volumes:
   mysql_data:
-  influxdb_data:

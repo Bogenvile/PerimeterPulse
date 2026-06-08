@@ -1,6 +1,6 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, getQuery, createError } from "nitro/h3";
-import { requireAuth } from "../../../../middleware/auth";
+import { requireUserAuth } from "../../../../middleware/auth";
 import { queryLocations } from "../../../../db/mysql";
 
 function parseRangeToHours(range: string): number {
@@ -12,7 +12,7 @@ function parseRangeToHours(range: string): number {
 }
 
 export default defineHandler(async (event) => {
-  await requireAuth(event);
+  await requireUserAuth(event);
 
   const id = getRouterParam(event, "id");
   if (!id) {
