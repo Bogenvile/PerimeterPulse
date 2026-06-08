@@ -109,27 +109,26 @@ func getWifiSignalWindows() int {
 	return 0
 }
 
-func getWifiSignalLinux() string {
+func getWifiSignalLinux() int {
 	out, err := exec.Command("iwconfig", "2>/dev/null").CombinedOutput()
 	if err != nil {
-		return ""
+		return 0
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		if strings.Contains(line, "Signal level") {
-			// Format: "Signal level=-45 dBm"
 			if idx := strings.Index(line, "Signal level="); idx >= 0 {
 				rest := line[idx+len("Signal level="):]
 				parts := strings.Fields(rest)
 				if len(parts) > 0 {
 					val := strings.TrimSpace(parts[0])
 					if d, err := strconv.Atoi(val); err == nil {
-						return strconv.Itoa(d)
+						return d
 					}
 				}
 			}
 		}
 	}
-	return ""
+	return 0
 }
 
 // getNetworkSpeed returns network interface speed in Mbps.
