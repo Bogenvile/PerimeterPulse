@@ -1,165 +1,119 @@
-//go:build linux
-
 package collector
 
 import (
-	"encoding/json"
 	"fmt"
+	"math"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
-// getOSLocation uses GeoClue2 via D-Bus to get the device's position.
-//
-// GeoClue2 is available on most Linux distributions (including Lubuntu).
-// Install with: sudo apt install geoclue-2.0
-//
-// The agent queries GeoClue2 by calling the gdbus command-line tool,
-// which is the simplest way to interface with D-Bus without CGo dependencies.
-func getOSLocation() (Location, error) {
-	// Check if geoclue is available
-	if _, err := exec.LookPath("gdbus"); err != nil {
-		return Location{}, fmt.Errorf("gdbus not found: install geoclue-2.0 + libglib2.0-bin")
+// CollectLocation tries to get the device location via GeoClue2.
+// Falls back to a GeoIP lookup if GeoClue is not available.
+func CollectLocation() (Location, error) {
+	lat, lon, err := getGeoClueLocation()
+	if err == nil && (lat != 0 || lon != 0) {
+		return Location{
+			Latitude:       lat,
+			Longitude:      lon,
+			AccuracyMeters: 50, // GeoClue typically provides good accuracy
+			Source:         "os",
+		}, nil
 	}
 
-	// Query GeoClue2 for client location
-	// We use a one-shot approach: create client, get location, then stop
-	output, err := exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", "/org/freedesktop/GeoClue2/Manager",
-		"--method", "org.freedesktop.GeoClue2.Manager.GetClient",
-	).CombinedOutput()
-
+	// Fallback to GeoIP
+	lat, lon, acc, src, err := GetGeoIPLocation()
 	if err != nil {
-		// GeoClue2 might not be running — try starting it
-		exec.Command("systemctl", "start", "geoclue").Run()
-		return Location{}, fmt.Errorf("geoclue2 unavailable: %v (%s)", err, strings.TrimSpace(string(output)))
+		return Location{}, err
 	}
-
-	// Parse the client path from output like: "(objectpath '/org/freedesktop/GeoClue2/Client/1',)"
-	clientPath := extractObjectPath(string(output))
-	if clientPath == "" {
-		return Location{}, fmt.Errorf("could not get geoclue client path")
-	}
-
-	// Start the client
-	exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", clientPath,
-		"--method", "org.freedesktop.GeoClue2.Client.Start",
-	).Run()
-
-	// Get location
-	locOutput, err := exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", clientPath,
-		"--method", "org.freedesktop.DBus.Properties.Get",
-		"org.freedesktop.GeoClue2.Client",
-		"Location",
-	).CombinedOutput()
-
-	if err != nil {
-		// Cleanup: stop client
-		exec.Command(
-			"gdbus", "call", "--system",
-			"--dest", "org.freedesktop.GeoClue2",
-			"--object-path", clientPath,
-			"--method", "org.freedesktop.GeoClue2.Client.Stop",
-		).Run()
-		return Location{}, fmt.Errorf("geoclue location failed: %v", err)
-	}
-
-	// Parse location path: typically like "('/org/freedesktop/GeoClue2/Location/1',)"
-	locPath := extractObjectPath(string(locOutput))
-	if locPath == "" {
-		return Location{}, fmt.Errorf("could not get geoclue location path")
-	}
-
-	// Read latitude
-	latOutput, _ := exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", locPath,
-		"--method", "org.freedesktop.DBus.Properties.Get",
-		"org.freedesktop.GeoClue2.Location",
-		"Latitude",
-	).CombinedOutput()
-
-	// Read longitude
-	lngOutput, _ := exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", locPath,
-		"--method", "org.freedesktop.DBus.Properties.Get",
-		"org.freedesktop.GeoClue2.Location",
-		"Longitude",
-	).CombinedOutput()
-
-	// Read accuracy
-	accOutput, _ := exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", locPath,
-		"--method", "org.freedesktop.DBus.Properties.Get",
-		"org.freedesktop.GeoClue2.Location",
-		"Accuracy",
-	).CombinedOutput()
-
-	// Stop client
-	exec.Command(
-		"gdbus", "call", "--system",
-		"--dest", "org.freedesktop.GeoClue2",
-		"--object-path", clientPath,
-		"--method", "org.freedesktop.GeoClue2.Client.Stop",
-	).Run()
-
-	lat := parseVariantDouble(string(latOutput))
-	lng := parseVariantDouble(string(lngOutput))
-	acc := parseVariantDouble(string(accOutput))
-
-	if lat == 0 && lng == 0 {
-		return Location{}, fmt.Errorf("geoclue returned zero coordinates")
-	}
-
 	return Location{
 		Latitude:       lat,
-		Longitude:      lng,
+		Longitude:      lon,
 		AccuracyMeters: acc,
+		Source:         src,
 	}, nil
 }
 
-// extractObjectPath extracts a D-Bus object path from gdbus output.
-// Input:  "(objectpath '/org/freedesktop/GeoClue2/Client/1',)"
-// Output: "/org/freedesktop/GeoClue2/Client/1"
-func extractObjectPath(output string) string {
-	start := strings.Index(output, "'")
-	if start == -1 {
-		return ""
+// getGeoClueLocation queries GeoClue2 via dbus-send for the current location.
+func getGeoClueLocation() (float64, float64, error) {
+	// Try to get location from GeoClue2 using the where-am-i demo
+	cmd := exec.Command("where-am-i")
+	output, err := cmd.Output()
+	if err == nil {
+		return parseWhereAmI(string(output))
 	}
-	end := strings.Index(output[start+1:], "'")
-	if end == -1 {
-		return ""
+
+	// Fallback: try dbus-send directly
+	// This is a simplified approach - in production you'd use a D-Bus library
+	cmd = exec.Command("dbus-send", "--print-reply", "--dest=org.freedesktop.GeoClue2",
+		"/org/freedesktop/GeoClue2/Client/1", "org.freedesktop.GeoClue2.Client.Location")
+	output, err = cmd.Output()
+	if err != nil {
+		return 0, 0, fmt.Errorf("geoclue: %w", err)
 	}
-	return output[start+1 : start+1+end]
+
+	return parseGeoClueOutput(string(output))
 }
 
-// parseVariantDouble extracts a double value from gdbus variant output.
-// Input:  "(<40.7128>,)"
-// Output: 40.7128
-func parseVariantDouble(output string) float64 {
-	start := strings.Index(output, "<")
-	if start == -1 {
-		return 0
+func parseWhereAmI(output string) (float64, float64, error) {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Latitude") {
+			latStr := strings.TrimSpace(strings.Split(line, ":")[1])
+			lat, err := strconv.ParseFloat(latStr, 64)
+			if err != nil {
+				return 0, 0, err
+			}
+			for _, l := range lines {
+				if strings.Contains(l, "Longitude") {
+					lonStr := strings.TrimSpace(strings.Split(l, ":")[1])
+					lon, err := strconv.ParseFloat(lonStr, 64)
+					if err != nil {
+						return 0, 0, err
+					}
+					return lat, lon, nil
+				}
+			}
+		}
 	}
-	end := strings.Index(output[start+1:], ">")
-	if end == -1 {
-		return 0
+	return 0, 0, fmt.Errorf("could not parse where-am-i output")
+}
+
+func parseGeoClueOutput(output string) (float64, float64, error) {
+	lines := strings.Split(output, "\n")
+	var lat, lon float64
+	foundLat, foundLon := false, false
+
+	for _, line := range lines {
+		if strings.Contains(line, "latitude") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				val, err := strconv.ParseFloat(parts[len(parts)-1], 64)
+				if err == nil {
+					lat = val
+					foundLat = true
+				}
+			}
+		}
+		if strings.Contains(line, "longitude") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				val, err := strconv.ParseFloat(parts[len(parts)-1], 64)
+				if err == nil {
+					lon = val
+					foundLon = true
+				}
+			}
+		}
 	}
-	val := output[start+1 : start+1+end]
-	var result float64
-	json.Unmarshal([]byte(val), &result)
-	return result
+
+	if !foundLat || !foundLon {
+		return 0, 0, fmt.Errorf("could not parse geoclue output")
+	}
+
+	if math.Abs(lat) > 90 || math.Abs(lon) > 180 {
+		return 0, 0, fmt.Errorf("invalid coordinates from geoclue")
+	}
+
+	return lat, lon, nil
 }
