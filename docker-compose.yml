@@ -1,0 +1,93 @@
+version: "3.9"
+
+# ============================================================
+# PerimeterPulse — Self-Hosted Deployment Stack
+#
+# Services:
+#   - postgres   : Relational DB for asset inventory & API keys
+#   - influxdb   : Time-series DB for metrics & location history
+#   - backend    : Node.js API server (Nitro/Express)
+#
+# Setup:
+#   1. Copy .env.example to .env and fill in values
+#   2. Run: docker compose up -d
+#   3. Initialize PostgreSQL: docker compose exec postgres psql -U perimeterpulse -d perimeterpulse -f /docker-entrypoint-initdb.d/schema.sql
+#   4. Generate an API key for agents:
+#      docker compose exec postgres psql -U perimeterpulse -d perimeterpulse -c "INSERT INTO api_keys (key_hash, label) VALUES (crypt('your-secret-key', gen_salt('bf')), 'default');"
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: perimeterpulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: perimeterpulse
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-perimeterpulse}
+      POSTGRES_DB: perimeterpulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./server/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perimeterpulse -d perimeterpulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pulse-net
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: perimeterpulse-influxdb
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USER:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:-perimeterpulse}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-perimeterpulse}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-perimeterpulse}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-perimeterpulse-token}
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdata:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pulse-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: perimeterpulse-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://perimeterpulse:${PG_PASSWORD:-perimeterpulse}@postgres:5432/perimeterpulse
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUX_TOKEN:-perimeterpulse-token}
+      INFLUXDB_ORG: ${INFLUX_ORG:-perimeterpulse}
+      INFLUXDB_BUCKET: ${INFLUX_BUCKET:-perimeterpulse}
+      NITRO_PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    networks:
+      - pulse-net
+
+volumes:
+  pgdata:
+  influxdata:
+
+networks:
+  pulse-net:
+    driver: bridge
