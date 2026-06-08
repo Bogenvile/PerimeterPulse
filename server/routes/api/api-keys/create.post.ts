@@ -1,7 +1,7 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
 import { query, queryOne, hashSecret } from "../../../db/mysql";
-import { requireAdminAuth } from "../../../middleware/auth";
+import { requireAdminAuth } from "../../../lib/auth";
 
 export default defineHandler(async (event) => {
   const jwt = await requireAdminAuth(event);

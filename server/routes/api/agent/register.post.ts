@@ -1,7 +1,7 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
 import { queryOne, query, parseJsonArray } from "../../../db/mysql";
-import { validateApiKeyByValue } from "../../../middleware/auth";
+import { validateApiKeyByValue } from "../../../lib/auth";
 
 interface RegisterBody {
   hostname: string; os: string; os_version: string; agent_version: string;

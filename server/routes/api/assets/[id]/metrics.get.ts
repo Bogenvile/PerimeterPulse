@@ -1,6 +1,6 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, getQuery, createError } from "nitro/h3";
-import { requireUserAuth } from "../../../../middleware/auth";
+import { requireUserAuth } from "../../../../lib/auth";
 import { queryMetrics } from "../../../../db/mysql";
 
 function parseRangeToHours(range: string): number {

@@ -1,5 +1,5 @@
 import { defineHandler } from "nitro";
-import { requireUserAuth } from "../../../middleware/auth";
+import { requireUserAuth } from "../../../lib/auth";
 import { query, parseJsonArray } from "../../../db/mysql";
 
 export default defineHandler(async (event) => {

@@ -1,7 +1,7 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
 import { queryOne, query, insertMetrics, insertLocation } from "../../../db/mysql";
-import { validateApiKeyByValue } from "../../../middleware/auth";
+import { validateApiKeyByValue } from "../../../lib/auth";
 
 interface HeartbeatBody {
   agent_id: string; api_key: string;

@@ -1,7 +1,7 @@
 import { defineHandler } from "nitro";
 import { createError } from "nitro/h3";
 import { queryOne } from "../../../db/mysql";
-import { requireUserAuth } from "../../../middleware/auth";
+import { requireUserAuth } from "../../../lib/auth";
 
 export default defineHandler(async (event) => {
   const jwt = await requireUserAuth(event);

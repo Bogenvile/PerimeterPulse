@@ -1,6 +1,6 @@
 import { defineHandler } from "nitro";
 import { query } from "../../../db/mysql";
-import { requireAdminAuth } from "../../../middleware/auth";
+import { requireAdminAuth } from "../../../lib/auth";
 
 export default defineHandler(async (event) => {
   await requireAdminAuth(event);
