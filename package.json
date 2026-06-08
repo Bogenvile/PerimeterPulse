@@ -48,6 +48,7 @@
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.3.0",
     "input-otp": "^1.2.4",
+    "jiti": "^2.4.2",
     "jose": "^6.2.3",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.462.0",
