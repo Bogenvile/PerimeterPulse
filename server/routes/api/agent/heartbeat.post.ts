@@ -1,20 +1,21 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
-import { queryOne, query } from "../../../db/mysql";
+import { queryOne, query, insertMetrics, insertLocation } from "../../../db/mysql";
 import { validateApiKeyByValue } from "../../../middleware/auth";
-import { writeMetric, writeLocation, flushWrites } from "../../../db/influx";
 
 interface HeartbeatBody {
   agent_id: string; api_key: string;
-  metrics: {
+  metrics?: {
     cpu_percent: number; ram_percent: number; ram_used_bytes: number; ram_total_bytes: number;
     storage_percent: number; storage_used_bytes: number; storage_total_bytes: number;
     uptime_seconds: number; network_status: "up" | "down" | "degraded";
     network_latency_ms: number;
+    gateway_reachable?: boolean; dns_working?: boolean; internet_reachable?: boolean;
+    default_gateway?: string;
     disk_health_status?: string; disk_temperature_c?: number;
     timestamp: string;
   };
-  location: {
+  location?: {
     latitude: number; longitude: number; accuracy_meters: number;
     source: "os" | "geoip"; timestamp: string;
   };
@@ -35,9 +36,11 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: "Invalid API key" });
   }
 
-  if (body.metrics) writeMetric(body.agent_id, body.metrics);
-  if (body.location) writeLocation(body.agent_id, body.location);
+  // Write metrics & location to MySQL
+  if (body.metrics) await insertMetrics(body.agent_id, body.metrics);
+  if (body.location) await insertLocation(body.agent_id, body.location);
 
+  // Update asset record
   const asset = await queryOne<{ id: string }>(
     `SELECT id FROM assets WHERE agent_id = ?`, [body.agent_id],
   );
@@ -69,7 +72,6 @@ export default defineHandler(async (event) => {
     );
   }
 
-  await flushWrites();
   return { ok: true, server_time: new Date().toISOString() };
 });
 

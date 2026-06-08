@@ -1,7 +1,15 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, getQuery, createError } from "nitro/h3";
 import { requireAuth } from "../../../../middleware/auth";
-import { queryLocations } from "../../../../db/influx";
+import { queryLocations } from "../../../../db/mysql";
+
+function parseRangeToHours(range: string): number {
+  const match = range.match(/^-(\d+)(h|d)$/);
+  if (!match) return 24;
+  const num = parseInt(match[1]);
+  const unit = match[2];
+  return unit === "d" ? num * 24 : num;
+}
 
 export default defineHandler(async (event) => {
   await requireAuth(event);
@@ -12,9 +20,9 @@ export default defineHandler(async (event) => {
   }
 
   const q = getQuery(event);
-  // Default to last 24 hours for location history
-  const rangeStart = (q.range as string) || "-24h";
+  const rangeStr = (q.range as string) || "-24h";
+  const hours = parseRangeToHours(rangeStr);
 
-  const data = await queryLocations(id, rangeStart);
+  const data = await queryLocations(id, hours);
   return data;
 });
