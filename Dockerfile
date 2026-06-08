@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy package files & install all dependencies (dev included for build)
 COPY package.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy seluruh source code
 COPY . .
@@ -22,7 +22,7 @@ RUN addgroup -g 1001 -S nodejs && \
 
 # Copy package.json & install hanya production dependencies
 COPY --chown=nodeapp:nodejs package.json ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm install --omit=dev --legacy-peer-deps && npm cache clean --force
 
 # Copy hasil build dan server code dari builder
 COPY --from=builder --chown=nodeapp:nodejs /app/dist ./dist
