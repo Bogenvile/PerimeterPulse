@@ -9,7 +9,7 @@
 1. [Architecture Overview](#architecture-overview)
 2. [System Requirements](#system-requirements)
 3. [Server Deployment (Docker)](#server-deployment-docker)
-4. [Database Setup (MySQL + InfluxDB)](#database-setup)
+4. [Database Setup (MySQL)](#database-setup-mysql)
 5. [API Key Management](#api-key-management)
 6. [Agent Installation](#agent-installation)
    - [Windows Agent](#windows-agent)
@@ -28,11 +28,11 @@
 │  Golang Agent    │ ──────────────────→  │  PerimeterPulse Server  │
 │  (Windows/Linux) │     Every 60s        │  (Node.js / Nitro)      │
 │                  │                      │                         │
-│  • CPU/RAM/Disk  │                      │  ┌──────────┐ ┌───────┐ │
-│  • WiFi/Network  │                      │  │  MySQL   │ │InfluxDB│ │
-│  • SMART Health  │                      │  │(Assets)  │ │(Metrics)│ │
-│  • GPS/WiFi Loc  │                      │  └──────────┘ └───────┘ │
-│  • Offline Buffer│                      │                         │
+│  • CPU/RAM/Disk  │                      │  ┌──────────┐           │
+│  • WiFi/Network  │                      │  │  MySQL   │           │
+│  • SMART Health  │                      │  │(Assets)  │           │
+│  • GPS/WiFi Loc  │                      │  │(Metrics) │
+│  • Offline Buffer│                      │  │(Locations)│
 └──────────────────┘                      └──────────┬──────────────┘
                                                      │
                                           ┌──────────▼──────────────┐
@@ -99,13 +99,6 @@ MYSQL_USER=perimeterpulse
 MYSQL_PASSWORD=ChooseAStrongPassword!
 MYSQL_DATABASE=perimeterpulse
 
-# InfluxDB
-INFLUX_USER=admin
-INFLUX_PASSWORD=ChooseAStrongPassword!
-INFLUX_ORG=perimeterpulse
-INFLUX_BUCKET=perimeterpulse
-INFLUX_TOKEN=GenerateARandomTokenHere
-
 # JWT Secret (generate with: openssl rand -hex 32)
 NITRO_JWT_SECRET=your-random-64-char-hex-string
 ```
@@ -118,7 +111,6 @@ docker compose up -d
 
 This starts:
 - `perimeterpulse-mysql` — MySQL 8.4 on port 3306
-- `perimeterpulse-influxdb` — InfluxDB 2.7 on port 8086
 - `perimeterpulse-backend` — Nitro/Express API on port 3000
 
 ### Step 4: Initialize MySQL Schema
@@ -184,7 +176,7 @@ curl http://localhost:3000/api/auth/login \
 
 ---
 
-## Database Setup
+## Database Setup (MySQL)
 
 ### MySQL Tables
 
@@ -193,13 +185,10 @@ curl http://localhost:3000/api/auth/login \
 | `users` | Dashboard login accounts (admin/viewer roles) |
 | `api_keys` | Agent authentication keys (bcrypt-hashed) |
 | `assets` | PC inventory — hostname, OS, CPU, RAM, disk, WiFi, IP, location |
+| `agent_metrics` | Time-series: CPU, RAM, disk, network status, latency, diagnostics |
+| `agent_locations` | Time-series: latitude, longitude, accuracy, source |
 
-### InfluxDB Measurements
-
-| Measurement | Fields |
-|------------|--------|
-| `agent_metrics` | cpu_percent, ram_percent, storage_percent, network_status, network_latency_ms, gateway_reachable, dns_working, internet_reachable |
-| `agent_location` | latitude, longitude, accuracy_meters, source (os/geoip) |
+All time-series data is stored directly in MySQL using indexed timestamp columns. No InfluxDB is required.
 
 ---
 
@@ -223,6 +212,8 @@ curl -X POST http://localhost:3000/api/api-keys/create \
 ---
 
 ## Agent Installation
+
+*(Agent installation instructions remain unchanged — all communication is via HTTP API, no InfluxDB dependency in agent.)*
 
 ### Windows Agent
 
@@ -419,10 +410,6 @@ const mysql = require('mysql2/promise');
 | `MYSQL_PASSWORD` | `perimeterpulse` | MySQL password |
 | `MYSQL_DATABASE` | `perimeterpulse` | MySQL database name |
 | `DATABASE_URL` | — | Alternative: `mysql://user:pass@host:port/db` |
-| `INFLUXDB_URL` | `http://localhost:8086` | InfluxDB HTTP endpoint |
-| `INFLUXDB_TOKEN` | `perimeterpulse-token` | InfluxDB auth token |
-| `INFLUXDB_ORG` | `perimeterpulse` | InfluxDB organization |
-| `INFLUXDB_BUCKET` | `perimeterpulse` | InfluxDB bucket name |
 | `NITRO_JWT_SECRET` | *(must change)* | JWT signing secret (64 hex chars) |
 | `NITRO_PORT` | `3000` | Server listen port |
 
@@ -468,7 +455,7 @@ The agent performs a **4-stage network diagnostic** every heartbeat:
 └─────────────────────────────────────────────────┘
 ```
 
-These diagnostics appear in the dashboard under each asset's network info section. The InfluxDB metrics also track `gateway_reachable`, `dns_working`, and `internet_reachable` as boolean fields for historical analysis.
+These diagnostics appear in the dashboard under each asset's network info section. The MySQL `agent_metrics` table tracks `gateway_reachable`, `dns_working`, and `internet_reachable` as boolean fields for historical analysis.
 
 ---
 
@@ -504,16 +491,6 @@ docker compose logs mysql
 docker compose ps mysql
 ```
 
-### InfluxDB not receiving data
-
-```bash
-# Check InfluxDB health
-curl http://localhost:8086/health
-
-# View metrics via UI
-open http://localhost:8086  (login: admin / your-influx-password)
-```
-
 ### Dashboard shows "No agents connected"
 
 1. Verify backend is running: `docker compose ps backend`
@@ -538,7 +515,7 @@ docker compose up -d     # Fresh start
 - 🔐 **Use HTTPS** with a reverse proxy (nginx, Caddy) in production
 - 🔐 **Rotate API keys** periodically
 - 🔐 **Restrict firewall** to only allow agent IPs to the API port
-- 🔐 **Backup MySQL and InfluxDB** volumes regularly
+- 🔐 **Backup MySQL** volumes regularly
 
 ---
 
@@ -551,15 +528,14 @@ perimeterpulse/
 ├── .env.example                # Environment template
 ├── server/
 │   ├── db/
-│   │   ├── schema.mysql.sql    # MySQL schema
-│   │   ├── mysql.ts            # MySQL connection + bcrypt
-│   │   └── influx.ts           # InfluxDB read/write
+│   │   ├── schema.mysql.sql    # MySQL schema (assets + time-series)
+│   │   └── mysql.ts            # MySQL connection + bcrypt + time-series queries
 │   ├── middleware/
 │   │   └── auth.ts             # JWT + API key auth
 │   └── routes/api/
 │       ├── auth/               # Login, session
 │       ├── agent/              # Register, heartbeat
-│       ├── assets/             # Asset CRUD + metrics
+│       ├── assets/             # Asset CRUD + metrics + locations
 │       └── api-keys/           # Key management
 ├── agent/                      # Golang monitoring agent
 │   ├── main.go
@@ -590,4 +566,3 @@ perimeterpulse/
         ├── Assets.tsx          # Asset list
         ├── AssetDetail.tsx     # Detail + charts
         └── Login.tsx           # Login page
-```
