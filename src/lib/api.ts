@@ -97,3 +97,33 @@ export async function changePassword(
     }),
   });
 }
+
+export interface UserInfo {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export async function getUsers(): Promise<UserInfo[]> {
+  return fetchApi<UserInfo[]>("/users");
+}
+
+export async function createUser(data: {
+  username: string;
+  display_name?: string;
+  password: string;
+  role: "admin" | "viewer";
+}): Promise<{ ok: boolean; id: number; username: string }> {
+  return fetchApi("/users/create", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await fetchApi(`/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+}

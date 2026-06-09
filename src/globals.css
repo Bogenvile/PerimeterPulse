@@ -129,12 +129,9 @@
 /* ── Leaflet Map ── */
 
 .leaflet-container {
-  background: hsl(var(--background)) !important;
+  background: #e8e4df !important;
   font-family: inherit !important;
-}
-
-.dark .leaflet-tile-pane {
-  filter: brightness(0.6) invert(1) hue-rotate(180deg) saturate(0.4) contrast(1.1);
+  z-index: 1;
 }
 
 .leaflet-control-zoom a {

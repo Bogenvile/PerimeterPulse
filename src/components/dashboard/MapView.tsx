@@ -27,11 +27,11 @@ function createMarkerIcon(status: string): L.DivIcon {
   const color = statusColors[status] || "#6b7280";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="0 0 28 44">
     <defs>
-      <filter id="shadow" x="-20%" y="-10%" width="140%" height="130%">
+      <filter id="s" x="-20%" y="-10%" width="140%" height="130%">
         <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="${color}" flood-opacity="0.35"/>
       </filter>
     </defs>
-    <path fill="${color}" stroke="#fff" stroke-width="2" d="M14 0C6.3 0 0 6.3 0 14C0 24.5 14 44 14 44S28 24.5 28 14C28 6.3 21.7 0 14 0z" filter="url(#shadow)"/>
+    <path fill="${color}" stroke="#fff" stroke-width="2" d="M14 0C6.3 0 0 6.3 0 14C0 24.5 14 44 14 44S28 24.5 28 14C28 6.3 21.7 0 14 0z" filter="url(#s)"/>
     <circle cx="14" cy="14" r="5.5" fill="#fff" opacity="0.95"/>
   </svg>`;
   return L.divIcon({
@@ -85,6 +85,7 @@ export function MapView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.LayerGroup>(L.layerGroup());
+  const initRef = useRef(false);
 
   const handleAssetClick = useCallback(
     (asset: MappableAsset) => {
@@ -94,24 +95,35 @@ export function MapView({
   );
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current || initRef.current) return;
+    initRef.current = true;
 
-    const map = L.map(containerRef.current, {
-      center,
-      zoom,
-      zoomControl: true,
-      attributionControl: false,
-    });
+    // Small delay to ensure container has proper dimensions
+    const timer = setTimeout(() => {
+      if (!containerRef.current) return;
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png", {
-      maxZoom: 19,
-      subdomains: "abcd",
-    }).addTo(map);
+      const map = L.map(containerRef.current, {
+        center,
+        zoom,
+        zoomControl: true,
+        attributionControl: false,
+      });
 
-    markersRef.current.addTo(map);
-    mapRef.current = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+      }).addTo(map);
+
+      markersRef.current.addTo(map);
+      mapRef.current = map;
+
+      // Force recalculation after tiles start loading
+      requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+    }, 100);
 
     return () => {
+      clearTimeout(timer);
       try {
         if (mapRef.current) {
           mapRef.current.remove();
@@ -120,6 +132,7 @@ export function MapView({
       } catch {
         // ignore
       }
+      initRef.current = false;
     };
   }, []);
 
@@ -159,9 +172,9 @@ export function MapView({
         `<div style="font-family:system-ui,-apple-system,sans-serif;min-width:160px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
             <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;${asset.status === 'online' ? 'box-shadow:0 0 6px ' + color : ''}"></span>
-            <strong style="font-size:13px;color:hsl(210 40% 98%)">${asset.hostname}</strong>
+            <strong style="font-size:13px;color:#1a1a2e">${asset.hostname}</strong>
           </div>
-          <div style="font-size:11px;color:hsl(215 20% 65%);line-height:1.7">
+          <div style="font-size:11px;color:#666;line-height:1.7">
             ${asset.os}<br/>
             ${asset.wifi_ssid || "No WiFi"} · <span style="color:${color}">${lastSeen}</span>
             ${location ? `<br/>📍 ${location}` : ""}
@@ -184,13 +197,18 @@ export function MapView({
     } catch {
       // ignore
     }
+
+    // Invalidate size after markers are placed
+    requestAnimationFrame(() => {
+      map.invalidateSize();
+    });
   }, [assets, handleAssetClick]);
 
   return (
     <div
       ref={containerRef}
-      className={`w-full ${className}`}
-      style={{ minHeight: 400 }}
+      className={className}
+      style={{ width: "100%", height: "100%", minHeight: 300 }}
     />
   );
 }
