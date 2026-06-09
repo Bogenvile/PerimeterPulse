@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { AgentStatus } from "@/lib/types";
@@ -25,13 +25,14 @@ const statusColors: Record<string, string> = {
 
 function createMarkerIcon(status: string): L.DivIcon {
   const color = statusColors[status] || "#6b7280";
+  const uid = "f" + Math.random().toString(36).slice(2, 8);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="0 0 28 44">
     <defs>
-      <filter id="s" x="-20%" y="-10%" width="140%" height="130%">
+      <filter id="${uid}" x="-20%" y="-10%" width="140%" height="130%">
         <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="${color}" flood-opacity="0.35"/>
       </filter>
     </defs>
-    <path fill="${color}" stroke="#fff" stroke-width="2" d="M14 0C6.3 0 0 6.3 0 14C0 24.5 14 44 14 44S28 24.5 28 14C28 6.3 21.7 0 14 0z" filter="url(#s)"/>
+    <path fill="${color}" stroke="#fff" stroke-width="2" d="M14 0C6.3 0 0 6.3 0 14C0 24.5 14 44 14 44S28 24.5 28 14C28 6.3 21.7 0 14 0z" filter="url(#${uid})"/>
     <circle cx="14" cy="14" r="5.5" fill="#fff" opacity="0.95"/>
   </svg>`;
   return L.divIcon({
@@ -86,6 +87,7 @@ export function MapView({
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.LayerGroup>(L.layerGroup());
   const initRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const handleAssetClick = useCallback(
     (asset: MappableAsset) => {
@@ -94,11 +96,11 @@ export function MapView({
     [onAssetClick],
   );
 
+  // Initialize map once
   useEffect(() => {
     if (!containerRef.current || initRef.current) return;
     initRef.current = true;
 
-    // Small delay to ensure container has proper dimensions
     const timer = setTimeout(() => {
       if (!containerRef.current) return;
 
@@ -116,9 +118,9 @@ export function MapView({
       markersRef.current.addTo(map);
       mapRef.current = map;
 
-      // Force recalculation after tiles start loading
       requestAnimationFrame(() => {
         map.invalidateSize();
+        setMapReady(true);
       });
     }, 100);
 
@@ -133,12 +135,14 @@ export function MapView({
         // ignore
       }
       initRef.current = false;
+      setMapReady(false);
     };
   }, []);
 
+  // Place markers whenever map is ready or assets change
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !mapReady) return;
 
     markersRef.current.clearLayers();
 
@@ -198,11 +202,10 @@ export function MapView({
       // ignore
     }
 
-    // Invalidate size after markers are placed
     requestAnimationFrame(() => {
       map.invalidateSize();
     });
-  }, [assets, handleAssetClick]);
+  }, [assets, handleAssetClick, mapReady]);
 
   return (
     <div
