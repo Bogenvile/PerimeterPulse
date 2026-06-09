@@ -2,79 +2,52 @@ package collector
 
 import (
 	"net"
+	"os/exec"
+	"runtime"
+	"strings"
 	"time"
 )
 
-// NetworkDiag holds basic network reachability checks.
-type NetworkDiag struct {
-	GatewayReachable  bool   `json:"gateway_reachable"`
-	DNSWorking        bool   `json:"dns_working"`
-	InternetReachable bool   `json:"internet_reachable"`
-	DefaultGateway    string `json:"default_gateway"`
+// RunNetworkDiagnostics checks connectivity and returns status + latency in ms
+func RunNetworkDiagnostics() (string, float64) {
+	status := "up"
+	latency := 0.0
+
+	// Check: any active non-loopback interface?
+	if !hasActiveInterface() {
+		return "down", 0.0
+	}
+
+	// Check gateway reachability
+	gw := GetDefaultGateway()
+	if gw == "" {
+		return "limited", 0.0
+	}
+
+	// Measure latency to gateway
+	latency = pingLatency(gw)
+
+	// DNS check
+	if !dnsWorks() {
+		status = "degraded"
+	}
+
+	// Internet check
+	if !internetReachable() {
+		status = "degraded"
+	}
+
+	if status == "degraded" && latency == 0.0 {
+		latency = pingLatency("8.8.8.8")
+	}
+
+	return status, latency
 }
 
-// RunNetworkDiag performs a quick reachability check and fills the
-// corresponding boolean pointers inside the supplied Metrics struct.
-func RunNetworkDiag(m *Metrics) {
-	diag := runDiag()
-
-	t := true
-	f := false
-	if diag.GatewayReachable {
-		m.GatewayReachable = &t
-	} else {
-		m.GatewayReachable = &f
-	}
-	if diag.DNSWorking {
-		m.DNSWorking = &t
-	} else {
-		m.DNSWorking = &f
-	}
-	if diag.InternetReachable {
-		m.InternetReachable = &t
-	} else {
-		m.InternetReachable = &f
-	}
-
-	m.DefaultGateway = diag.DefaultGateway
-
-	// Determine overall network status
-	if !diag.GatewayReachable && !diag.InternetReachable {
-		m.NetworkStatus = "down"
-	} else if diag.GatewayReachable && !diag.InternetReachable {
-		m.NetworkStatus = "degraded"
-	} else {
-		m.NetworkStatus = "up"
-	}
-}
-
-func runDiag() NetworkDiag {
-	diag := NetworkDiag{}
-
-	// Detect default gateway
-	diag.DefaultGateway = detectDefaultGateway()
-
-	// Gateway reachable (TCP port 53 or 80 on gateway)
-	if diag.DefaultGateway != "" {
-		diag.GatewayReachable = tcpProbe(diag.DefaultGateway+":53", 2*time.Second)
-	}
-
-	// DNS working (try resolve google.com)
-	diag.DNSWorking = dnsProbe("google.com", 2*time.Second)
-
-	// Internet reachable (TCP to 8.8.8.8:53)
-	diag.InternetReachable = tcpProbe("8.8.8.8:53", 3*time.Second)
-
-	return diag
-}
-
-func detectDefaultGateway() string {
-	// Simplified: use net.Interfaces and pick the first non-loopback with a default route.
-	// A full implementation would parse `ip route` or `route print`.
-	// For now, fallback to 8.8.8.8 as gateway probe target (not ideal, but functional).
+func hasActiveInterface() bool {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		return ""
+		return false
 	}
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
@@ -85,22 +58,23 @@ func detectDefaultGateway() string {
 			continue
 		}
 		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.IsGlobalUnicast() {
-				// Try to infer gateway (rough: assume .1 in same subnet)
-				gw := make(net.IP, len(ipnet.IP))
-				copy(gw, ipnet.IP)
-				if len(gw) >= 4 {
-					gw[len(gw)-1] = 1
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				if ipnet.IP.IsGlobalUnicast() || ipnet.IP.IsPrivate() {
+					return true
 				}
-				return gw.String()
 			}
 		}
 	}
-	return ""
+	return false
 }
 
-func tcpProbe(address string, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", address, timeout)
+func dnsWorks() bool {
+	_, err := net.LookupHost("google.com")
+	return err == nil
+}
+
+func internetReachable() bool {
+	conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 3*time.Second)
 	if err != nil {
 		return false
 	}
@@ -108,7 +82,24 @@ func tcpProbe(address string, timeout time.Duration) bool {
 	return true
 }
 
-func dnsProbe(host string, timeout time.Duration) bool {
-	_, err := net.LookupHost(host)
-	return err == nil
+func pingLatency(target string) float64 {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "-n", "1", "-w", "2000", target)
+	} else {
+		cmd = exec.Command("ping", "-c", "1", "-W", "2", target)
+	}
+	start := time.Now()
+	out, err := cmd.Output()
+	elapsed := time.Since(start).Seconds() * 1000
+
+	if err != nil {
+		return 0.0
+	}
+
+	output := string(out)
+	if strings.Contains(output, "time=") || strings.Contains(output, "time<") {
+		return elapsed
+	}
+	return 0.0
 }

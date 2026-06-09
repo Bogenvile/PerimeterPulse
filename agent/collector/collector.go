@@ -3,6 +3,7 @@ package collector
 import (
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -14,7 +15,6 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/shirou/gopsutil/v3/net"
 )
 
 type SystemInfo struct {
@@ -78,8 +78,6 @@ func getPhysicalStorageTotal() uint64 {
 }
 
 func getLinuxPhysicalStorage() uint64 {
-	// Use lsblk to get the physical disk size (not partition)
-	// This avoids counting virtual/loop/snap disks
 	cmd := exec.Command("lsblk", "-b", "-d", "-o", "NAME,SIZE,TYPE,MOUNTPOINT", "-n")
 	out, err := cmd.Output()
 	if err != nil {
@@ -105,7 +103,6 @@ func getLinuxPhysicalStorage() uint64 {
 			diskType = fields[2]
 		}
 
-		// Skip loop, ram, snap, sr (CD-ROM), and virtual devices
 		if strings.HasPrefix(name, "loop") ||
 			strings.HasPrefix(name, "ram") ||
 			strings.HasPrefix(name, "sr") ||
@@ -113,7 +110,6 @@ func getLinuxPhysicalStorage() uint64 {
 			continue
 		}
 
-		// Only count physical disks, not partitions
 		if diskType != "disk" {
 			continue
 		}
@@ -132,7 +128,6 @@ func getLinuxPhysicalStorage() uint64 {
 }
 
 func getWindowsPhysicalStorage() uint64 {
-	// PowerShell: Get total physical disk size (not partition)
 	cmd := exec.Command("powershell", "-Command",
 		"(Get-PhysicalDisk | Measure-Object -Property Size -Sum).Sum")
 	out, err := cmd.Output()
@@ -142,8 +137,6 @@ func getWindowsPhysicalStorage() uint64 {
 			return size
 		}
 	}
-
-	// Fallback: root partition
 	return getStorageFromRootPartition()
 }
 
@@ -163,10 +156,11 @@ func getMacAddresses() []string {
 	}
 
 	for _, iface := range interfaces {
+		// Skip loopback and down interfaces
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
-		if iface.HardwareAddr != nil && len(iface.HardwareAddr) > 0 {
+		if len(iface.HardwareAddr) > 0 {
 			macs = append(macs, iface.HardwareAddr.String())
 		}
 	}
@@ -215,10 +209,10 @@ func CollectMetrics() Metrics {
 		m.UptimeSeconds = uptime
 	}
 
-	// Network diagnostics (dari diag.go)
+	// Network diagnostics
 	m.NetworkStatus, m.NetworkLatencyMs = RunNetworkDiagnostics()
 
-	// Disk info (dari smart.go)
+	// Disk info
 	diskInfo := CollectDiskInfo()
 	m.DiskHealthStatus = diskInfo.HealthStatus
 	m.DiskTemperatureC = diskInfo.Temperature
