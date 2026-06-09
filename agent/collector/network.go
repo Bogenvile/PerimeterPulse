@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"fmt"
 	"net"
 	"os/exec"
 	"runtime"
