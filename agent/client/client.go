@@ -4,94 +4,85 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"time"
 )
 
-type Client struct {
-	ServerURL string
-	HTTP      *http.Client
+type RegistrationRequest struct {
+	Hostname         string   `json:"hostname"`
+	OS               string   `json:"os"`
+	OSVersion        string   `json:"os_version"`
+	AgentVersion     string   `json:"agent_version"`
+	APIKey           string   `json:"api_key"`
+	MACAddresses     []string `json:"mac_addresses"`
+	IPAddresses      []string `json:"ip_addresses"`
+	CPUModel         string   `json:"cpu_model"`
+	CPUCores         int      `json:"cpu_cores"`
+	RAMTotalBytes    int64    `json:"ram_total_bytes"`
+	StorageTotalBytes int64   `json:"storage_total_bytes"`
+	DiskModel        string   `json:"disk_model"`
+	DiskType         string   `json:"disk_type"`
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps int      `json:"network_speed_mbps"`
 }
 
-func New(serverURL string) *Client {
-	return &Client{
-		ServerURL: serverURL,
-		HTTP: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-	}
+type MetricsData struct {
+	CPUPercent       float64 `json:"cpu_percent"`
+	RAMPercent       float64 `json:"ram_percent"`
+	RAMUsedBytes     int64   `json:"ram_used_bytes"`
+	RAMTotalBytes    int64   `json:"ram_total_bytes"`
+	StoragePercent   float64 `json:"storage_percent"`
+	StorageUsedBytes int64   `json:"storage_used_bytes"`
+	StorageTotalBytes int64  `json:"storage_total_bytes"`
+	UptimeSeconds    int64   `json:"uptime_seconds"`
+	NetworkStatus    string  `json:"network_status"`
+	NetworkLatencyMs float64 `json:"network_latency_ms"`
+	Timestamp        string  `json:"timestamp"`
 }
 
-func (c *Client) Register(body map[string]interface{}) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/agent/register", c.ServerURL)
-	resp, err := c.post(url, body)
-	if err != nil {
-		return nil, fmt.Errorf("register request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("register failed: %d %s", resp.StatusCode, string(b))
-	}
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-	return result, nil
+type LocationData struct {
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	AccuracyMeters float64 `json:"accuracy_meters"`
+	Source         string  `json:"source"`
+	Timestamp      string  `json:"timestamp"`
 }
 
-func (c *Client) SendHeartbeat(body map[string]interface{}) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/agent/heartbeat", c.ServerURL)
-	resp, err := c.post(url, body)
-	if err != nil {
-		return nil, fmt.Errorf("heartbeat request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("heartbeat failed: %d %s", resp.StatusCode, string(b))
-	}
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode heartbeat response: %w", err)
-	}
-	return result, nil
+type NetworkInfoData struct {
+	WiFiSSID        string   `json:"wifi_ssid"`
+	WiFiSignalDBM   int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps int     `json:"network_speed_mbps"`
+	IPAddresses     []string `json:"ip_addresses"`
 }
 
-func (c *Client) SendRaw(path string, body map[string]interface{}) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s%s", c.ServerURL, path)
-	resp, err := c.post(url, body)
-	if err != nil {
-		return nil, fmt.Errorf("send raw failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("send raw failed: %d %s", resp.StatusCode, string(b))
-	}
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode raw response: %w", err)
-	}
-	return result, nil
+type HeartbeatRequest struct {
+	AgentID     string           `json:"agent_id"`
+	APIKey      string           `json:"api_key"`
+	Metrics     *MetricsData     `json:"metrics,omitempty"`
+	Location    *LocationData    `json:"location,omitempty"`
+	NetworkInfo *NetworkInfoData `json:"network_info,omitempty"`
 }
 
-func (c *Client) post(url string, body map[string]interface{}) (*http.Response, error) {
+func Register(server string, req *RegistrationRequest) error {
+	return postJSON(server+"/api/agent/register", req)
+}
+
+func SendHeartbeat(server string, req *HeartbeatRequest) error {
+	return postJSON(server+"/api/agent/heartbeat", req)
+}
+
+func postJSON(url string, body interface{}) error {
 	data, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("marshal body: %w", err)
+		return fmt.Errorf("marshal error: %w", err)
 	}
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("http error: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	return c.HTTP.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("server returned %d", resp.StatusCode)
+	}
+	return nil
 }

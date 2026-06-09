@@ -2,104 +2,110 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/perimeterpulse/agent/client"
 	"github.com/perimeterpulse/agent/collector"
 )
 
+type agentState struct {
+	AgentID string
+	APIKey  string
+}
+
 func main() {
-	server := flag.String("server", "http://localhost:3000", "Server URL")
-	apiKey := flag.String("apikey", "", "API key for authentication")
-	hostname := flag.String("hostname", "", "Override hostname (optional)")
+	server := flag.String("server", "http://localhost:3000", "server URL")
+	apikey := flag.String("apikey", "", "API key for authentication")
+	hostname := flag.String("hostname", "", "override hostname")
 	flag.Parse()
 
-	if *apiKey == "" {
+	if *apikey == "" {
 		log.Fatal("--apikey is required")
 	}
-	if *hostname == "" {
-		var err error
-		*hostname, err = os.Hostname()
-		if err != nil {
-			log.Fatalf("Cannot get hostname: %v", err)
-		}
+
+	// Collect system info to register
+	info := collector.CollectInfo()
+	if *hostname != "" {
+		info.Hostname = *hostname
 	}
 
-	c := client.New(*server)
-
-	// Registrasi
-	registerBody := map[string]interface{}{
-		"hostname": *hostname,
-		"api_key":  *apiKey,
+	state := &agentState{
+		AgentID: info.AgentID,
+		APIKey:  *apikey,
 	}
-	log.Printf("Registering agent: %s", *hostname)
-	resp, err := c.Register(registerBody)
+
+	// Register once
+	err := client.Register(*server, &client.RegistrationRequest{
+		Hostname:         info.Hostname,
+		OS:               info.OS,
+		OSVersion:        info.OSVersion,
+		AgentVersion:     info.AgentVersion,
+		APIKey:           *apikey,
+		MACAddresses:     info.MACAddresses,
+		IPAddresses:      info.IPAddresses,
+		CPUModel:         info.CPUModel,
+		CPUCores:         info.CPUCores,
+		RAMTotalBytes:    info.RAMTotalBytes,
+		StorageTotalBytes: info.StorageTotalBytes,
+		DiskModel:        info.DiskModel,
+		DiskType:         info.DiskType,
+		WiFiSSID:         info.WiFiSSID,
+		WiFiSignalDBM:    info.WiFiSignalDBM,
+		NetworkSpeedMbps: info.NetworkSpeedMbps,
+	})
+
 	if err != nil {
-		log.Fatalf("Registration failed: %v", err)
+		log.Printf("Registration failed: %v (will retry on heartbeat)", err)
 	}
 
-	agentID, ok := resp["agent_id"].(string)
-	if !ok || agentID == "" {
-		log.Fatal("Server returned empty agent_id")
-	}
-	log.Printf("Registered as agent: %s", agentID)
-
-	// State untuk heartbeat
-	type agentState struct {
-		AgentID string
-		APIKey  string
-	}
-	state := agentState{AgentID: agentID, APIKey: *apiKey}
-
-	// Kirim heartbeat pertama langsung
-	sendHeartbeat(c, &state)
-
-	// Ticker setiap 60 detik
+	// Heartbeat loop every 60 seconds
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	for range ticker.C {
+		metrics := collector.CollectMetrics()
+		location := collector.CollectLocation()
+		networkInfo := collector.CollectNetworkInfo()
 
-	for {
-		select {
-		case <-ticker.C:
-			sendHeartbeat(c, &state)
-		case <-sig:
-			log.Println("Shutting down...")
-			return
+		// Build the heartbeat request from current state
+		req := &client.HeartbeatRequest{
+			AgentID: state.AgentID,
+			APIKey:  state.APIKey,
+			Metrics: &client.MetricsData{
+				CPUPercent:       metrics.CPUPercent,
+				RAMPercent:       metrics.RAMPercent,
+				RAMUsedBytes:     metrics.MemoryUsed,    // assuming field name is MemoryUsed
+				RAMTotalBytes:    metrics.MemoryTotal,   // assume MemoryTotal
+				StoragePercent:   metrics.StoragePercent,
+				StorageUsedBytes: metrics.DiskUsed,      // assume DiskUsed
+				StorageTotalBytes: metrics.DiskTotal,    // assume DiskTotal
+				UptimeSeconds:    metrics.UptimeSeconds,
+				NetworkStatus:    metrics.NetworkStatus,
+				NetworkLatencyMs: metrics.NetworkLatencyMs,
+				Timestamp:        time.Now().UTC().Format(time.RFC3339),
+			},
+			Location: &client.LocationData{
+				Latitude:       location.Latitude,
+				Longitude:      location.Longitude,
+				AccuracyMeters: location.AccuracyMeters,
+				Source:         location.Source,
+				Timestamp:      time.Now().UTC().Format(time.RFC3339),
+			},
+			NetworkInfo: &client.NetworkInfoData{
+				WiFiSSID:        networkInfo.WiFiSSID,
+				WiFiSignalDBM:   networkInfo.WiFiSignalDBM,
+				NetworkSpeedMbps: networkInfo.NetworkSpeedMbps,
+				IPAddresses:     networkInfo.IPAddresses,
+			},
 		}
-	}
-}
 
-func sendHeartbeat(c *client.Client, state *struct{ AgentID, APIKey string }) {
-	metrics := collector.CollectMetrics()
-
-	hb := map[string]interface{}{
-		"agent_id": state.AgentID,
-		"api_key":  state.APIKey,
-		"metrics": map[string]interface{}{
-			"cpu_percent":        metrics.CPUPercent,
-			"ram_percent":        metrics.RAMPercent,
-			"ram_used_bytes":     metrics.RAMUsedBytes,
-			"ram_total_bytes":    metrics.RAMTotalBytes,
-			"storage_percent":    metrics.StoragePercent,
-			"storage_used_bytes": metrics.StorageUsedBytes,
-			"storage_total_bytes": metrics.StorageTotalBytes,
-			"uptime_seconds":     metrics.UptimeSeconds,
-			"network_status":     metrics.NetworkStatus,
-			"network_latency_ms": metrics.NetworkLatencyMs,
-			"timestamp":          time.Now().UTC().Format(time.RFC3339),
-		},
-	}
-
-	if _, err := c.SendHeartbeat(hb); err != nil {
-		log.Printf("Heartbeat failed: %v", err)
-	} else {
-		log.Printf("Heartbeat sent at %s", time.Now().Format(time.RFC3339))
+		err := client.SendHeartbeat(*server, req)
+		if err != nil {
+			log.Printf("Heartbeat failed: %v", err)
+		} else {
+			log.Println("Heartbeat sent successfully")
+		}
 	}
 }
