@@ -12,14 +12,21 @@ interface MappableAsset {
   last_location_lng: number | null;
 }
 
-// Fix default Leaflet icon paths
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-import shadowUrl from "leaflet/dist/images/marker-shadow.png";
+// Inline SVG marker icon sebagai data URI — tidak perlu import file gambar
+const defaultIconSvg = encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+    <path fill="#3b82f6" stroke="#fff" stroke-width="2" d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+    <circle cx="12.5" cy="12.5" r="5" fill="#fff"/>
+  </svg>`
+);
 
-// @ts-expect-error Leaflet icon types
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl });
+const defaultIcon = L.icon({
+  iconUrl: `data:image/svg+xml,${defaultIconSvg}`,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowUrl: "",
+});
 
 const statusColors: Record<string, string> = {
   online: "#10b981",
@@ -30,18 +37,16 @@ const statusColors: Record<string, string> = {
 
 function createMarkerIcon(status: string) {
   const color = statusColors[status] || "#6b7280";
-  return L.divIcon({
-    className: "custom-marker",
-    html: `<div style="
-      width: 14px; height: 14px;
-      background: ${color};
-      border: 2px solid #fff;
-      border-radius: 50%;
-      box-shadow: 0 0 10px ${color}66, 0 2px 6px rgba(0,0,0,0.4);
-    "></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-    popupAnchor: [0, -10],
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+    <path fill="${color}" stroke="#fff" stroke-width="2" d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+    <circle cx="12.5" cy="12.5" r="5" fill="#fff"/>
+  </svg>`;
+  return L.icon({
+    iconUrl: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowUrl: "",
   });
 }
 
@@ -75,22 +80,32 @@ export function MapView({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const map = L.map(containerRef.current, {
-      center,
-      zoom,
-      zoomControl: true,
-      attributionControl: false,
-    });
+    try {
+      const map = L.map(containerRef.current, {
+        center,
+        zoom,
+        zoomControl: true,
+        attributionControl: false,
+      });
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      maxZoom: 19,
-    }).addTo(map);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        maxZoom: 19,
+      }).addTo(map);
 
-    mapRef.current = map;
+      mapRef.current = map;
+    } catch (err) {
+      console.error("MapView init error:", err);
+    }
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+      } catch {
+        // ignore cleanup errors
+      }
     };
   }, []);
 
@@ -99,44 +114,55 @@ export function MapView({
     const map = mapRef.current;
     if (!map) return;
 
-    // Clear old markers
-    markersRef.current.forEach((m) => m.remove());
-    markersRef.current = [];
+    // Clear old markers safely
+    try {
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+    } catch {
+      markersRef.current = [];
+    }
 
-    assets.forEach((asset) => {
-      if (
-        asset.last_location_lat == null ||
-        asset.last_location_lng == null
-      )
-        return;
+    const validAssets = assets.filter(
+      (a) =>
+        a.last_location_lat != null &&
+        a.last_location_lng != null &&
+        !isNaN(a.last_location_lat) &&
+        !isNaN(a.last_location_lng),
+    );
 
-      const marker = L.marker(
-        [asset.last_location_lat, asset.last_location_lng],
-        { icon: createMarkerIcon(asset.status) },
-      )
-        .bindPopup(
-          `<div style="font-family:system-ui,sans-serif;font-size:13px;color:#e2e8f0">
-            <strong>${asset.hostname}</strong><br/>
-            <span style="font-size:11px;color:#94a3b8">${asset.os} — ${asset.status}</span>
-          </div>`,
+    if (validAssets.length === 0) return;
+
+    validAssets.forEach((asset) => {
+      try {
+        const marker = L.marker(
+          [asset.last_location_lat!, asset.last_location_lng!],
+          { icon: createMarkerIcon(asset.status) },
         )
-        .addTo(map);
+          .bindPopup(
+            `<div style="font-family:system-ui,sans-serif;font-size:13px;color:#e2e8f0">
+              <strong>${asset.hostname}</strong><br/>
+              <span style="font-size:11px;color:#94a3b8">${asset.os} — ${asset.status}</span>
+            </div>`,
+          )
+          .addTo(map);
 
-      marker.on("click", () => handleAssetClick(asset));
-      markersRef.current.push(marker);
+        marker.on("click", () => handleAssetClick(asset));
+        markersRef.current.push(marker);
+      } catch (err) {
+        console.warn("Failed to add marker for asset:", asset.id, err);
+      }
     });
 
-    // Fit bounds if there are markers
-    const validAssets = assets.filter(
-      (a) => a.last_location_lat != null && a.last_location_lng != null,
-    );
-    if (validAssets.length > 0) {
+    // Fit bounds
+    try {
       const bounds = L.latLngBounds(
         validAssets.map((a) => [a.last_location_lat!, a.last_location_lng!] as [number, number]),
       );
       if (bounds.isValid()) {
         map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
       }
+    } catch {
+      // ignore bounds errors
     }
   }, [assets, handleAssetClick]);
 
