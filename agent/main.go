@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/perimeterpulse/agent/collector"
+	"agent/collector"
 )
 
 type HeartbeatPayload struct {
-	AgentID string                `json:"agent_id"`
-	APIKey  string                `json:"api_key"`
-	Metrics *collector.Metrics    `json:"metrics,omitempty"`
-	Location *collector.Location  `json:"location,omitempty"`
+	AgentID     string                `json:"agent_id"`
+	APIKey      string                `json:"api_key"`
+	Metrics     *collector.Metrics    `json:"metrics,omitempty"`
+	Location    *collector.Location   `json:"location,omitempty"`
 	NetworkInfo *collector.NetworkInfo `json:"network_info,omitempty"`
 }
 
@@ -44,10 +44,8 @@ func main() {
 		}
 	}
 
-	// Register agent
 	register()
 
-	// Start heartbeat loop every 5 seconds
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -71,7 +69,6 @@ func getEnv(key, fallback string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
 	}
-	// Also check command-line flags via a simple approach
 	return fallback
 }
 
@@ -102,8 +99,6 @@ func register() {
 func sendHeartbeat() {
 	metrics := collector.CollectMetrics()
 	network := collector.CollectNetwork()
-
-	// Collect location (try multiple methods)
 	var loc *collector.Location
 	if l, err := collector.GetLocation(); err == nil {
 		loc = l
@@ -141,8 +136,7 @@ func sendHeartbeat() {
 func getMACShort() string {
 	netInfo := collector.CollectNetwork()
 	if len(netInfo.IPAddresses) > 0 {
-		// Use a simple hash of IP as fallback identifier
-		// In production, use actual MAC address from registration
+		return netInfo.IPAddresses[0]
 	}
 	return "default"
 }
