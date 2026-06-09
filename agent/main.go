@@ -48,16 +48,17 @@ func main() {
 	}
 	log.Printf("Registered as agent: %s", agentID)
 
-	// Simpan state
-	state := &agentState{
-		AgentID: agentID,
-		APIKey:  *apiKey,
+	// State untuk heartbeat
+	type agentState struct {
+		AgentID string
+		APIKey  string
 	}
+	state := agentState{AgentID: agentID, APIKey: *apiKey}
 
-	// Kirim heartbeat pertama
-	sendHeartbeat(c, state)
+	// Kirim heartbeat pertama langsung
+	sendHeartbeat(c, &state)
 
-	// Loop setiap 60 detik
+	// Ticker setiap 60 detik
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
@@ -67,7 +68,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			sendHeartbeat(c, state)
+			sendHeartbeat(c, &state)
 		case <-sig:
 			log.Println("Shutting down...")
 			return
@@ -75,18 +76,25 @@ func main() {
 	}
 }
 
-type agentState struct {
-	AgentID string
-	APIKey  string
-}
-
-func sendHeartbeat(c *client.Client, state *agentState) {
+func sendHeartbeat(c *client.Client, state *struct{ AgentID, APIKey string }) {
 	metrics := collector.CollectMetrics()
 
 	hb := map[string]interface{}{
 		"agent_id": state.AgentID,
 		"api_key":  state.APIKey,
-		"metrics":  metrics,
+		"metrics": map[string]interface{}{
+			"cpu_percent":        metrics.CPUPercent,
+			"ram_percent":        metrics.RAMPercent,
+			"ram_used_bytes":     metrics.RAMUsedBytes,
+			"ram_total_bytes":    metrics.RAMTotalBytes,
+			"storage_percent":    metrics.StoragePercent,
+			"storage_used_bytes": metrics.StorageUsedBytes,
+			"storage_total_bytes": metrics.StorageTotalBytes,
+			"uptime_seconds":     metrics.UptimeSeconds,
+			"network_status":     metrics.NetworkStatus,
+			"network_latency_ms": metrics.NetworkLatencyMs,
+			"timestamp":          time.Now().UTC().Format(time.RFC3339),
+		},
 	}
 
 	if _, err := c.SendHeartbeat(hb); err != nil {
