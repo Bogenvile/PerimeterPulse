@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runtime"
 	"time"
 
 	"agent/collector"
@@ -32,26 +33,9 @@ func New(serverURL, apiKey, hostname string) *Client {
 }
 
 func (c *Client) Register() error {
-	payload := collector.RegistrationPayload{
-		Hostname:   c.hostname,
-		Os:         collector.GetOS(),
-		OsVersion:  collector.GetOSVersion(),
-		AgentVersion: "1.0.0",
-		MACAddresses: collector.GetMACAddresses(),
-		IPAddresses:  collector.GetIPAddresses(),
-		CPUModel:     collector.GetCPUModel(),
-		CPUCores:     collector.GetCPUCores(),
-		RAMTotalBytes: collector.GetRAMTotal(),
-		StorageTotalBytes: collector.GetStorageTotal(),
-		DiskModel:    collector.GetDiskModel(),
-		DiskType:     collector.GetDiskType(),
-		WiFiSSID:     collector.GetWiFiSSID(),
-		WiFiSignalDBM: collector.GetWiFiSignalDBM(),
-		NetworkSpeedMbps: collector.GetNetworkSpeed(),
-		APIKey:       c.apiKey,
-	}
+	info := collector.CollectInfo(c.apiKey)
 
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(info)
 	if err != nil {
 		return fmt.Errorf("marshal register payload: %w", err)
 	}
@@ -72,26 +56,41 @@ func (c *Client) Register() error {
 		AgentID string `json:"agent_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode register response: %w", err)
+		log.Printf("Register decode warning: %v", err)
 	}
 
-	c.agentID = result.AgentID
-	log.Printf("Registered with agent_id: %s", c.agentID)
+	if result.AgentID != "" {
+		c.agentID = result.AgentID
+	} else {
+		c.agentID = c.hostname + "-" + runtime.GOOS
+	}
+
+	log.Printf("Registered, agent_id: %s", c.agentID)
 	return nil
 }
 
 func (c *Client) Heartbeat(metrics *collector.Metrics, location *collector.Location, network *collector.NetworkInfo) error {
-	payload := collector.HeartbeatPayload{
-		AgentID: c.agentID,
-		APIKey:  c.apiKey,
-		Metrics: metrics,
-		Location: location,
+	if c.agentID == "" {
+		return fmt.Errorf("not registered yet")
+	}
+
+	payload := struct {
+		AgentID     string                `json:"agent_id"`
+		APIKey      string                `json:"api_key"`
+		Metrics     *collector.Metrics    `json:"metrics,omitempty"`
+		Location    *collector.Location   `json:"location,omitempty"`
+		NetworkInfo *collector.NetworkInfo `json:"network_info,omitempty"`
+	}{
+		AgentID:     c.agentID,
+		APIKey:      c.apiKey,
+		Metrics:     metrics,
+		Location:    location,
 		NetworkInfo: network,
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal heartbeat payload: %w", err)
+		return fmt.Errorf("marshal heartbeat: %w", err)
 	}
 
 	resp, err := c.http.Post(c.serverURL+"/api/agent/heartbeat", "application/json", bytes.NewReader(body))
