@@ -1,114 +1,108 @@
--- ============================================================================
--- PerimeterPulse — MySQL Schema
--- ============================================================================
+-- PerimeterPulse Schema — MySQL 8.4
 
-CREATE DATABASE IF NOT EXISTS perimeterpulse
-  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-USE perimeterpulse;
-
--- ──── Users ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
-  id            CHAR(36)     NOT NULL DEFAULT (UUID()),
-  username      VARCHAR(64)  NOT NULL UNIQUE,
+  id CHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+  username VARCHAR(64) NOT NULL UNIQUE,
+  display_name VARCHAR(128) NOT NULL DEFAULT '',
   password_hash VARCHAR(255) NOT NULL,
-  display_name  VARCHAR(128) NOT NULL DEFAULT '',
-  role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
-  is_active     TINYINT(1)   NOT NULL DEFAULT 1,
-  created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  last_login_at TIMESTAMP    NULL DEFAULT NULL,
-  PRIMARY KEY (id)
-) ENGINE=InnoDB;
+  role ENUM('admin', 'viewer') NOT NULL DEFAULT 'viewer',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login_at DATETIME NULL,
+  INDEX idx_username (username),
+  INDEX idx_role (role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ──── API Keys ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS api_keys (
-  id           CHAR(36)    NOT NULL DEFAULT (UUID()),
-  key_prefix   VARCHAR(12) NOT NULL,
-  key_hash     VARCHAR(255) NOT NULL,
-  label        VARCHAR(128) NOT NULL DEFAULT '',
-  is_active    TINYINT(1)  NOT NULL DEFAULT 1,
-  created_at   TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  last_used_at TIMESTAMP   NULL DEFAULT NULL,
-  created_by   CHAR(36)    NULL,
-  PRIMARY KEY (id),
-  INDEX idx_api_keys_prefix (key_prefix)
-) ENGINE=InnoDB;
+  id CHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+  key_prefix VARCHAR(11) NOT NULL,
+  key_hash VARCHAR(255) NOT NULL,
+  label VARCHAR(128) NOT NULL DEFAULT '',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at DATETIME NULL,
+  created_by CHAR(36) NULL,
+  INDEX idx_prefix (key_prefix),
+  INDEX idx_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ──── Assets (PC Inventory) ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS assets (
-  id                  CHAR(36)     NOT NULL DEFAULT (UUID()),
-  agent_id            VARCHAR(128) NOT NULL UNIQUE,
-  hostname            VARCHAR(255) NOT NULL,
-  os                  VARCHAR(64)  NOT NULL DEFAULT '',
-  os_version          VARCHAR(32)  NOT NULL DEFAULT '',
-  agent_version       VARCHAR(16)  NOT NULL DEFAULT '1.0.0',
-  mac_addresses       JSON         NULL,
-  ip_addresses        JSON         NULL,
-  cpu_model           VARCHAR(128) NOT NULL DEFAULT '',
-  cpu_cores           INT          NOT NULL DEFAULT 0,
-  ram_total_bytes     BIGINT       NOT NULL DEFAULT 0,
-  storage_total_bytes BIGINT       NOT NULL DEFAULT 0,
-  disk_model          VARCHAR(128) NOT NULL DEFAULT '',
-  disk_type           VARCHAR(16)  NOT NULL DEFAULT 'unknown',
-  disk_health_status  VARCHAR(16)  NULL DEFAULT NULL,
-  disk_temperature_c  DECIMAL(5,1) NULL DEFAULT NULL,
-  wifi_ssid           VARCHAR(128) NOT NULL DEFAULT '',
-  wifi_signal_dbm     INT          NULL DEFAULT NULL,
-  network_speed_mbps  INT          NOT NULL DEFAULT 0,
-  status              ENUM('online','offline','warning','critical') NOT NULL DEFAULT 'offline',
-  last_seen_at        TIMESTAMP    NULL DEFAULT NULL,
-  last_location_lat   DECIMAL(10,7) NULL DEFAULT NULL,
-  last_location_lng   DECIMAL(10,7) NULL DEFAULT NULL,
-  created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  INDEX idx_assets_agent_id (agent_id),
-  INDEX idx_assets_status (status)
-) ENGINE=InnoDB;
+  id CHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+  agent_id VARCHAR(64) NOT NULL UNIQUE,
+  hostname VARCHAR(255) NOT NULL,
+  os VARCHAR(128) NOT NULL DEFAULT '',
+  os_version VARCHAR(64) NOT NULL DEFAULT '',
+  agent_version VARCHAR(32) NOT NULL DEFAULT '',
+  mac_addresses JSON NOT NULL,
+  ip_addresses JSON NOT NULL,
+  cpu_model VARCHAR(255) NOT NULL DEFAULT '',
+  cpu_cores INT UNSIGNED NOT NULL DEFAULT 0,
+  ram_total_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  storage_total_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  disk_model VARCHAR(255) NOT NULL DEFAULT '',
+  disk_type VARCHAR(32) NOT NULL DEFAULT 'unknown',
+  disk_health_status VARCHAR(32) NOT NULL DEFAULT 'ok',
+  disk_temperature_c DECIMAL(6,2) NULL,
+  wifi_ssid VARCHAR(255) NOT NULL DEFAULT '',
+  wifi_signal_dbm SMALLINT NULL,
+  network_speed_mbps INT UNSIGNED NOT NULL DEFAULT 0,
+  status ENUM('online','offline','warning','critical') NOT NULL DEFAULT 'offline',
+  last_seen_at DATETIME NULL,
+  last_location_lat DECIMAL(10,7) NULL,
+  last_location_lng DECIMAL(10,7) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_status (status),
+  INDEX idx_hostname (hostname),
+  INDEX idx_last_seen (last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ──── Time-Series: Agent Metrics ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_metrics (
-  id                BIGINT       NOT NULL AUTO_INCREMENT,
-  agent_id          VARCHAR(128) NOT NULL,
-  cpu_percent       DECIMAL(5,1) NOT NULL DEFAULT 0,
-  ram_percent       DECIMAL(5,1) NOT NULL DEFAULT 0,
-  ram_used_bytes    BIGINT       NOT NULL DEFAULT 0,
-  ram_total_bytes   BIGINT       NOT NULL DEFAULT 0,
-  storage_percent   DECIMAL(5,1) NOT NULL DEFAULT 0,
-  storage_used_bytes BIGINT      NOT NULL DEFAULT 0,
-  storage_total_bytes BIGINT     NOT NULL DEFAULT 0,
-  uptime_seconds    BIGINT       NOT NULL DEFAULT 0,
-  network_status    VARCHAR(16)  NOT NULL DEFAULT 'unknown',
-  network_latency_ms DECIMAL(8,2) NOT NULL DEFAULT 0,
-  gateway_reachable TINYINT(1)   NULL DEFAULT NULL,
-  dns_working       TINYINT(1)   NULL DEFAULT NULL,
-  internet_reachable TINYINT(1)  NULL DEFAULT NULL,
-  default_gateway   VARCHAR(45)  NULL DEFAULT NULL,
-  disk_health_status VARCHAR(16) NULL DEFAULT NULL,
-  disk_temperature_c DECIMAL(5,1) NULL DEFAULT NULL,
-  recorded_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  INDEX idx_metrics_agent_time (agent_id, recorded_at),
-  INDEX idx_metrics_time (recorded_at)
-) ENGINE=InnoDB;
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  agent_id VARCHAR(64) NOT NULL,
+  cpu_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+  ram_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+  ram_used_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  ram_total_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  storage_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+  storage_used_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  storage_total_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  uptime_seconds BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  network_status VARCHAR(32) NOT NULL DEFAULT 'up',
+  network_latency_ms DECIMAL(10,2) NOT NULL DEFAULT 0,
+  gateway_reachable TINYINT(1) NULL,
+  dns_working TINYINT(1) NULL,
+  internet_reachable TINYINT(1) NULL,
+  default_gateway VARCHAR(64) NULL,
+  disk_health_status VARCHAR(32) NULL,
+  disk_temperature_c DECIMAL(6,2) NULL,
+  recorded_at DATETIME(3) NOT NULL,
+  INDEX idx_agent_time (agent_id, recorded_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ──── Time-Series: Agent Locations ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_locations (
-  id               BIGINT        NOT NULL AUTO_INCREMENT,
-  agent_id         VARCHAR(128)  NOT NULL,
-  latitude         DECIMAL(10,7) NOT NULL,
-  longitude        DECIMAL(10,7) NOT NULL,
-  accuracy_meters  DECIMAL(8,1)  NOT NULL DEFAULT 0,
-  source           VARCHAR(16)   NOT NULL DEFAULT 'unknown',
-  recorded_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  INDEX idx_locations_agent_time (agent_id, recorded_at),
-  INDEX idx_locations_time (recorded_at)
-) ENGINE=InnoDB;
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  agent_id VARCHAR(64) NOT NULL,
+  latitude DECIMAL(10,7) NOT NULL,
+  longitude DECIMAL(10,7) NOT NULL,
+  accuracy_meters INT UNSIGNED NOT NULL DEFAULT 0,
+  source VARCHAR(16) NOT NULL DEFAULT 'geoip',
+  recorded_at DATETIME(3) NOT NULL,
+  INDEX idx_agent_time (agent_id, recorded_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ──── Default Users ──────────────────────────────────────────────────────────
--- Password hashes dibuat dengan bcrypt (cost 10). 
--- Jalankan seed script untuk update hash yang benar.
-INSERT IGNORE INTO users (username, password_hash, display_name, role) VALUES
-  ('admin',  '$2a$10$PLACEHOLDER_ADMIN_HASH',  'Administrator', 'admin'),
-  ('viewer', '$2a$10$PLACEHOLDER_VIEWER_HASH', 'Viewer',        'viewer');
+-- Seed default users (bcrypt hashes will be replaced in production)
+-- Default password for both: "password" (bcrypt hash)
+INSERT IGNORE INTO users (id, username, display_name, password_hash, role, is_active) VALUES
+  (UUID(), 'admin', 'Administrator', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin', 1),
+  (UUID(), 'viewer', 'Viewer', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'viewer', 1);
+
+-- Create default API key
+INSERT IGNORE INTO api_keys (id, key_prefix, key_hash, label, is_active)
+VALUES (
+  UUID(),
+  'ppulse-s',
+  '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+  'Default Agent Key',
+  1
+);
