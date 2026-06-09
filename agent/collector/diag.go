@@ -1,105 +1,75 @@
 package collector
 
 import (
+	"fmt"
 	"net"
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 )
 
-// RunNetworkDiagnostics checks connectivity and returns status + latency in ms
-func RunNetworkDiagnostics() (string, float64) {
-	status := "up"
-	latency := 0.0
-
-	// Check: any active non-loopback interface?
-	if !hasActiveInterface() {
-		return "down", 0.0
-	}
-
-	// Check gateway reachability
-	gw := GetDefaultGateway()
-	if gw == "" {
-		return "limited", 0.0
-	}
-
-	// Measure latency to gateway
-	latency = pingLatency(gw)
-
-	// DNS check
-	if !dnsWorks() {
-		status = "degraded"
-	}
-
-	// Internet check
-	if !internetReachable() {
-		status = "degraded"
-	}
-
-	if status == "degraded" && latency == 0.0 {
-		latency = pingLatency("8.8.8.8")
-	}
-
-	return status, latency
-}
-
-func hasActiveInterface() bool {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return false
-	}
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
+// GetDefaultGateway returns the IP of the default gateway.
+// On Windows, uses `route print 0.0.0.0`. On Linux, reads `/proc/net/route`.
+func GetDefaultGateway() (string, error) {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("powershell", "-Command",
+			"(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -First 1).NextHop")
+		out, err := cmd.Output()
 		if err != nil {
+			return "", fmt.Errorf("failed to get gateway: %w", err)
+		}
+		gw := strings.TrimSpace(string(out))
+		if gw == "" {
+			return "", fmt.Errorf("no default gateway found")
+		}
+		return gw, nil
+	}
+	// Linux: parse /proc/net/route
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return "", fmt.Errorf("cannot read /proc/net/route: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines[1:] { // skip header
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
 			continue
 		}
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok {
-				if ipnet.IP.IsGlobalUnicast() || ipnet.IP.IsPrivate() {
-					return true
-				}
+		if fields[1] == "00000000" { // destination 0.0.0.0
+			// gateway is in hex
+			gwHex := fields[2]
+			if len(gwHex) == 8 {
+				ip := fmt.Sprintf("%d.%d.%d.%d",
+					hexToInt(gwHex[6:8]),
+					hexToInt(gwHex[4:6]),
+					hexToInt(gwHex[2:4]),
+					hexToInt(gwHex[0:2]),
+				)
+				return ip, nil
 			}
 		}
 	}
-	return false
+	return "", fmt.Errorf("no default gateway found in /proc/net/route")
 }
 
-func dnsWorks() bool {
+func hexToInt(hex string) int {
+	var val int
+	fmt.Sscanf(hex, "%x", &val)
+	return val
+}
+
+// DNS lookup helper
+func CheckDNS() bool {
 	_, err := net.LookupHost("google.com")
 	return err == nil
 }
 
-func internetReachable() bool {
-	conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 3*time.Second)
+// Internet connectivity check: TCP connect to Google DNS
+func CheckInternet() bool {
+	conn, err := net.Dial("tcp", "8.8.8.8:53")
 	if err != nil {
 		return false
 	}
 	conn.Close()
 	return true
-}
-
-func pingLatency(target string) float64 {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "1", "-w", "2000", target)
-	} else {
-		cmd = exec.Command("ping", "-c", "1", "-W", "2", target)
-	}
-	start := time.Now()
-	out, err := cmd.Output()
-	elapsed := time.Since(start).Seconds() * 1000
-
-	if err != nil {
-		return 0.0
-	}
-
-	output := string(out)
-	if strings.Contains(output, "time=") || strings.Contains(output, "time<") {
-		return elapsed
-	}
-	return 0.0
 }
