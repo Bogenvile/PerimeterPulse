@@ -50,7 +50,6 @@ func main() {
 
 	// Collect initial info
 	info := collector.CollectInfo()
-	info.APIKey = apiKey
 
 	// Register
 	registerPayload := RegisterPayload{
@@ -83,7 +82,6 @@ func main() {
 	}
 	log.Println("Registration successful")
 
-	// Generate a stable agent ID (use hostname + os + macs etc.)
 	agentID := info.Hostname + "-" + info.OS
 
 	// Heartbeat loop
