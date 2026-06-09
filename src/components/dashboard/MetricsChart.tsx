@@ -45,6 +45,12 @@ const metricConfig = {
   },
 };
 
+function formatValue(value: unknown, unit: string): string {
+  const num = Number(value);
+  if (isNaN(num)) return `0${unit}`;
+  return `${num.toFixed(1)}${unit}`;
+}
+
 export function MetricsChart({
   data,
   metric,
@@ -98,8 +104,8 @@ export function MetricsChart({
             fontSize: "12px",
           }}
           labelStyle={{ color: "hsl(215 20% 65%)" }}
-          formatter={(value: number) => [
-            `${value.toFixed(1)}${config.unit}`,
+          formatter={(value: unknown) => [
+            formatValue(value, config.unit),
             config.label,
           ]}
         />

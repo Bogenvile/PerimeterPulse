@@ -6,6 +6,12 @@ interface StatsCardsProps {
   stats: DashboardStats;
 }
 
+function safePercent(value: number | undefined): string {
+  const num = Number(value);
+  if (isNaN(num)) return "0.0%";
+  return `${num.toFixed(1)}%`;
+}
+
 export function StatsCards({ stats }: StatsCardsProps) {
   const cards = [
     {
@@ -38,14 +44,14 @@ export function StatsCards({ stats }: StatsCardsProps) {
     },
     {
       label: "Avg CPU",
-      value: `${stats.avg_cpu_percent.toFixed(1)}%`,
+      value: safePercent(stats.avg_cpu_percent),
       icon: Cpu,
       color: "text-sky-500",
       bgColor: "bg-sky-500/10",
     },
     {
       label: "Avg RAM",
-      value: `${stats.avg_ram_percent.toFixed(1)}%`,
+      value: safePercent(stats.avg_ram_percent),
       icon: HardDrive,
       color: "text-violet-500",
       bgColor: "bg-violet-500/10",
