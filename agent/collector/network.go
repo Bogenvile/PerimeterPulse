@@ -1,44 +1,31 @@
 package collector
 
 import (
-	"log"
 	"net"
-	"os/exec"
-	"runtime"
-	"strings"
 )
 
-func getDefaultInterfaceName() string {
-	// Return first non-loopback interface name
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
+func CollectNetwork() *NetworkInfo {
+	// Collect network info
+	ips := getLocalIPs()
+
+	info := &NetworkInfo{
+		WiFiSSID:      getWiFiSSID(),
+		WiFiSignalDBM: getWiFiSignalDBM(),
+		SpeedMbps:     100, // Placeholder — implement real detection if possible
+		IPAddresses:   ips,
 	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback == 0 && iface.Flags&net.FlagUp != 0 {
-			return iface.Name
-		}
-	}
-	return ""
+	return info
 }
 
-func CollectNetworkInfo() *NetworkInfo {
-	info := &NetworkInfo{
-		WiFiSSID:        "",
-		WiFiSignalDBM:   0,
-		NetworkSpeedMbps: 0,
-		IPAddresses:     []string{},
-	}
-
-	// Collect IP addresses
+// getLocalIPs returns non-loopback IPv4 addresses
+func getLocalIPs() []string {
+	var ips []string
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		log.Printf("Error getting network interfaces: %v", err)
-		return info
+		return ips
 	}
-
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
 		addrs, err := iface.Addrs()
@@ -46,35 +33,26 @@ func CollectNetworkInfo() *NetworkInfo {
 			continue
 		}
 		for _, addr := range addrs {
-			ipnet, ok := addr.(*net.IPNet)
-			if ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-				info.IPAddresses = append(info.IPAddresses, ipnet.IP.String())
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip != nil && ip.To4() != nil {
+				ips = append(ips, ip.String())
 			}
 		}
 	}
+	return ips
+}
 
-	// Attempt to get WiFi SSID and signal via platform-specific methods
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("powershell", "-Command",
-			"(Get-NetAdapter -Name '*Wi-Fi*' | Get-NetConnectionProfile).Name")
-		out, err := cmd.Output()
-		if err == nil {
-			ssid := strings.TrimSpace(string(out))
-			if ssid != "" {
-				info.WiFiSSID = ssid
-			}
-		}
-	} else if runtime.GOOS == "linux" {
-		// iwconfig
-		cmd := exec.Command("iwgetid", "-r")
-		out, err := cmd.Output()
-		if err == nil {
-			ssid := strings.TrimSpace(string(out))
-			if ssid != "" {
-				info.WiFiSSID = ssid
-			}
-		}
-	}
+// Stub functions — replace with real WiFi detection per platform
+func getWiFiSSID() string {
+	return "Unknown"
+}
 
-	return info
+func getWiFiSignalDBM() float64 {
+	return -50
 }
