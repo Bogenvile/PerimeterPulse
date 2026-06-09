@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -104,7 +103,7 @@ func sendHeartbeat(httpClient *client.Client, buf *buffer.Buffer, sysInfo collec
 
 	// Build heartbeat payload
 	heartbeat := client.HeartbeatPayload{
-		AgentID: "", // Will be set by agent registration or read from config
+		AgentID: "",
 		APIKey:  httpClient.APIKey,
 		Metrics: &client.HeartbeatMetrics{
 			CPUPercent:       metrics.CPUPercent,
@@ -140,7 +139,6 @@ func sendHeartbeat(httpClient *client.Client, buf *buffer.Buffer, sysInfo collec
 	err := httpClient.Heartbeat(heartbeat)
 	if err != nil {
 		log.Printf("Heartbeat failed: %v (buffering for later)", err)
-		// Buffer the heartbeat for retry
 		buf.Append(heartbeat)
 	} else {
 		log.Printf("Heartbeat sent successfully for %s", sysInfo.Hostname)

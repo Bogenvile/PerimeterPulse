@@ -1,31 +1,41 @@
 package buffer
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"sync"
 )
 
-// Buffer stores failed heartbeats to disk for offline replay
 type Buffer struct {
-	filePath string
-	mu       sync.Mutex
+	path  string
+	mu    sync.Mutex
+	file  *os.File
 }
 
-func NewBuffer(agentID, apiKey, filePath string) *Buffer {
-	// Store credentials in the buffer for replay
-	// (We simply write failed payloads as JSON lines)
-	return &Buffer{
-		filePath: filePath,
+func NewBuffer(path string) *Buffer {
+	b := &Buffer{path: path}
+	return b
+}
+
+// HasPending returns true if there are buffered items
+func (b *Buffer) HasPending() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	info, err := os.Stat(b.path)
+	if err != nil || info.Size() == 0 {
+		return false
 	}
+	return true
 }
 
-// Append writes a failed heartbeat payload to the buffer file
+// Append adds a heartbeat payload to the buffer file
 func (b *Buffer) Append(payload interface{}) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	f, err := os.OpenFile(b.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(b.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return
 	}
@@ -40,61 +50,31 @@ func (b *Buffer) Append(payload interface{}) {
 	f.Write([]byte("\n"))
 }
 
-// Flush reads all buffered payloads and returns them
+// Flush reads all buffered payloads and clears the file
 func (b *Buffer) Flush() [][]byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	data, err := os.ReadFile(b.filePath)
-	if err != nil {
-		return nil
-	}
-
-	// Clear the file after reading
-	os.Truncate(b.filePath, 0)
-
 	var payloads [][]byte
-	lines := splitLines(string(data))
-	for _, line := range lines {
-		if line != "" {
-			payloads = append(payloads, []byte(line))
-		}
-	}
-	return payloads
-}
 
-// HasPending returns true if there are buffered payloads
-func (b *Buffer) HasPending() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	info, err := os.Stat(b.filePath)
+	f, err := os.Open(b.path)
 	if err != nil {
-		return false
+		return payloads
 	}
-	return info.Size() > 0
-}
+	defer f.Close()
 
-// Clear removes the buffer file
-func (b *Buffer) Clear() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	os.Remove(b.filePath)
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	current := ""
-	for _, ch := range s {
-		if ch == '\n' {
-			lines = append(lines, current)
-			current = ""
-		} else {
-			current += string(ch)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) > 0 {
+			payload := make([]byte, len(line))
+			copy(payload, line)
+			payloads = append(payloads, payload)
 		}
 	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
+
+	// Clear file after reading
+	os.Truncate(b.path, 0)
+
+	return payloads
 }
