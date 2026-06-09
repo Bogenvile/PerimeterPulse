@@ -88,6 +88,17 @@ const AssetDetailPage = () => {
       .finally(() => setLoading(false));
   }, [token, id, timeRange]);
 
+  // Fetch real error logs when dialog opens
+  useEffect(() => {
+    if (!showErrorDetail || !id || !token) return;
+    setLoadingErrors(true);
+    setApiToken(token);
+    fetchErrorLogs(id, 50)
+      .then(setErrorLogs)
+      .catch(() => setErrorLogs([]))
+      .finally(() => setLoadingErrors(false));
+  }, [showErrorDetail, id, token]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -124,17 +135,6 @@ const AssetDetailPage = () => {
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
 
   const errorHistory = metrics.filter((m) => Number(m.error_count) > 0);
-
-  // Fetch real error logs when dialog opens
-  useEffect(() => {
-    if (!showErrorDetail || !id || !token) return;
-    setLoadingErrors(true);
-    setApiToken(token);
-    fetchErrorLogs(id, 50)
-      .then(setErrorLogs)
-      .catch(() => setErrorLogs([]))
-      .finally(() => setLoadingErrors(false));
-  }, [showErrorDetail, id, token]);
 
   return (
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
