@@ -1,5 +1,5 @@
 import { getAuthHeaders } from "./auth";
-import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ApiKeyInfo, ErrorLogItem } from "./types";
+import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ApiKeyInfo, ErrorLogItem, AgentCommand } from "./types";
 
 const API_BASE = "/api";
 
@@ -126,4 +126,26 @@ export async function createUser(data: {
 
 export async function deleteUser(id: string): Promise<void> {
   await fetchApi(`/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ──── Remote Command API ────
+
+export async function sendCommand(
+  assetId: string,
+  command: string,
+): Promise<AgentCommand> {
+  return fetchApi<AgentCommand>(`/assets/${encodeURIComponent(assetId)}/commands`, {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+}
+
+export async function getCommandHistory(
+  assetId: string,
+  limit?: number,
+): Promise<AgentCommand[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return fetchApi<AgentCommand[]>(
+    `/assets/${encodeURIComponent(assetId)}/commands${params}`,
+  );
 }

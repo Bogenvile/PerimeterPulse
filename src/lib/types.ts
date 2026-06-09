@@ -165,3 +165,21 @@ export interface ApiKeyInfo {
   created_at: string;
   last_used_at: string | null;
 }
+
+// ──── Remote Command Types ────
+
+export type CommandStatus = "pending" | "running" | "completed" | "failed" | "timeout";
+
+export interface AgentCommand {
+  id: number;
+  agent_id: string;
+  command: string;
+  status: CommandStatus;
+  output: string | null;
+  error: string | null;
+  exit_code: number | null;
+  created_by: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
