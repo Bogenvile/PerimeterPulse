@@ -1,6 +1,6 @@
 import { defineHandler } from "nitro";
 import { getRequestHeaders, createError } from "nitro/h3";
-import { queryOne, verifySecret } from "../db/mysql";
+import { query, verifySecret } from "../db/mysql";
 import * as jose from "jose";
 
 const JWT_SECRET = new TextEncoder().encode(
@@ -74,11 +74,6 @@ export async function requireAdminAuth(
 
 export async function validateApiKeyByValue(rawKey: string): Promise<string | null> {
   // Fetch all active API key hashes and compare with bcrypt
-  const rows = await queryOne<{ id: string; key_hash: string }[]>(
-    `SELECT id, key_hash FROM api_keys WHERE is_active = 1`,
-  );
-  // Actually we need all rows, not just one
-  const { query } = await import("../db/mysql");
   const allKeys = await query<{ id: string; key_hash: string }>(
     `SELECT id, key_hash FROM api_keys WHERE is_active = 1`,
   );
