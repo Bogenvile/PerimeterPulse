@@ -109,33 +109,11 @@ func CollectMetrics() *Metrics {
 	return m
 }
 
-func CollectLocation() *Location {
-	return &Location{
-		Latitude:       0,
-		Longitude:      0,
-		AccuracyMeters: 0,
-		Source:         "geoip",
-	}
-}
-
 func CollectNetwork() *NetworkInfo {
 	return &NetworkInfo{
-		WiFiSSID:        "",
-		WiFiSignalDBM:   0,
+		WiFiSSID:         "",
+		WiFiSignalDBM:    0,
 		NetworkSpeedMbps: 0,
-		IPAddresses:     []string{},
+		IPAddresses:      []string{},
 	}
-}
-
-// Helper stubs for network diagnostics
-func GetDefaultGateway() (string, error) {
-	return "", nil
-}
-
-func CheckDNS() bool {
-	return true
-}
-
-func CheckInternet() bool {
-	return true
 }
