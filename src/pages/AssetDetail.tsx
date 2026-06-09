@@ -24,11 +24,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+function isNoSignal(dbm: number | null): boolean {
+  return dbm === null || dbm === 0 || dbm === -999;
+}
+
 function wifiSignalLabel(dbm: number | null): { text: string; color: string } {
-  if (dbm === null || dbm === 0 || dbm === -999) return { text: "No signal", color: "text-muted-foreground" };
-  if (dbm >= -50) return { text: "Excellent", color: "text-emerald-400" };
-  if (dbm >= -65) return { text: "Good", color: "text-blue-400" };
-  if (dbm >= -75) return { text: "Fair", color: "text-amber-400" };
+  if (isNoSignal(dbm)) return { text: "No signal data", color: "text-muted-foreground" };
+  if (dbm! >= -50) return { text: "Excellent", color: "text-emerald-400" };
+  if (dbm! >= -65) return { text: "Good", color: "text-blue-400" };
+  if (dbm! >= -75) return { text: "Fair", color: "text-amber-400" };
   return { text: "Weak", color: "text-red-400" };
 }
 
@@ -132,6 +136,7 @@ const AssetDetailPage = () => {
   }
 
   const signalInfo = wifiSignalLabel(asset.wifi_signal_dbm);
+  const hasSignal = !isNoSignal(asset.wifi_signal_dbm);
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
 
   const errorHistory = metrics.filter((m) => Number(m.error_count) > 0);
@@ -223,7 +228,7 @@ const AssetDetailPage = () => {
           </div>
           <p className="text-sm font-semibold truncate">{asset.wifi_ssid || "N/A"}</p>
           <p className={`text-xs ${signalInfo.color}`}>
-            {asset.wifi_signal_dbm != null && asset.wifi_signal_dbm !== -999
+            {hasSignal
               ? `${asset.wifi_signal_dbm} dBm (${signalInfo.text})`
               : signalInfo.text}
           </p>

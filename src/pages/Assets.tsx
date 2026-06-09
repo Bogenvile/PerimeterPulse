@@ -35,7 +35,7 @@ function formatLastSeen(iso: string | null): string {
 }
 
 function formatWifiSignal(dbm: number | null): string {
-  if (dbm === null || dbm === 0 || dbm === -999) return "No signal";
+  if (dbm === null || dbm === 0 || dbm === -999) return "";
   return `${dbm} dBm`;
 }
 
@@ -142,55 +142,58 @@ const AssetsPage = () => {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {filtered.map((asset) => (
-          <Card
-            key={asset.id}
-            onClick={() => navigate(`/assets/${asset.id}`)}
-            className="cursor-pointer border-border bg-card p-4 shadow-sm transition-all hover:bg-muted/50 hover:border-foreground/10 hover:shadow-md"
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
-                <p className="text-xs text-muted-foreground">{asset.os} {asset.os_version}</p>
+        {filtered.map((asset) => {
+          const signalStr = formatWifiSignal(asset.wifi_signal_dbm);
+          return (
+            <Card
+              key={asset.id}
+              onClick={() => navigate(`/assets/${asset.id}`)}
+              className="cursor-pointer border-border bg-card p-4 shadow-sm transition-all hover:bg-muted/50 hover:border-foreground/10 hover:shadow-md"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
+                  <p className="text-xs text-muted-foreground">{asset.os} {asset.os_version}</p>
+                </div>
+                <AgentStatusBadge status={asset.status} showLabel={false} />
               </div>
-              <AgentStatusBadge status={asset.status} showLabel={false} />
-            </div>
-            <div className="space-y-1.5 text-xs text-muted-foreground">
-              <div className="flex justify-between">
-                <span>CPU</span>
-                <span className="text-foreground">{asset.cpu_model.split(" ").slice(-1)[0]}</span>
+              <div className="space-y-1.5 text-xs text-muted-foreground">
+                <div className="flex justify-between">
+                  <span>CPU</span>
+                  <span className="text-foreground">{asset.cpu_model.split(" ").slice(-1)[0]}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>RAM</span>
+                  <span className="text-foreground">{formatBytes(asset.ram_total_bytes)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Disk</span>
+                  <span className="text-foreground">
+                    {asset.disk_type}{" "}
+                    {asset.disk_health_status && asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>WiFi</span>
+                  <span className="text-foreground truncate ml-2 max-w-[100px]" title={asset.wifi_ssid}>
+                    {asset.wifi_ssid || "N/A"}
+                    {signalStr && ` (${signalStr})`}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>IP</span>
+                  <span className="text-foreground font-mono text-[10px]">
+                    {asset.ip_addresses?.[0] || "N/A"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Last seen</span>
+                  <span className="text-foreground">{formatLastSeen(asset.last_seen_at)}</span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span>RAM</span>
-                <span className="text-foreground">{formatBytes(asset.ram_total_bytes)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Disk</span>
-                <span className="text-foreground">
-                  {asset.disk_type}{" "}
-                  {asset.disk_health_status && asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>WiFi</span>
-                <span className="text-foreground truncate ml-2 max-w-[100px]" title={asset.wifi_ssid}>
-                  {asset.wifi_ssid || "N/A"}
-                  {asset.wifi_signal_dbm != null && ` (${formatWifiSignal(asset.wifi_signal_dbm)})`}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>IP</span>
-                <span className="text-foreground font-mono text-[10px]">
-                  {asset.ip_addresses?.[0] || "N/A"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Last seen</span>
-                <span className="text-foreground">{formatLastSeen(asset.last_seen_at)}</span>
-              </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
