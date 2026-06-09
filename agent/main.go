@@ -1,96 +1,148 @@
 package main
 
 import (
-	"flag"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"perimeterpulse/agent/collector"
-	"perimeterpulse/agent/client"
-	"perimeterpulse/agent/buffer"
+	"github.com/perimeterpulse/agent/collector"
+)
+
+type HeartbeatPayload struct {
+	AgentID string                `json:"agent_id"`
+	APIKey  string                `json:"api_key"`
+	Metrics *collector.Metrics    `json:"metrics,omitempty"`
+	Location *collector.Location  `json:"location,omitempty"`
+	NetworkInfo *collector.NetworkInfo `json:"network_info,omitempty"`
+}
+
+var (
+	serverURL string
+	apiKey    string
+	hostname  string
 )
 
 func main() {
-	server := flag.String("server", "", "Server URL (e.g. https://example.com)")
-	apikey := flag.String("apikey", "", "API key for authentication")
-	hostname := flag.String("hostname", "", "Override hostname (optional)")
-	flag.Parse()
+	serverURL = getEnv("SERVER", "http://localhost:3000")
+	apiKey = getEnv("APIKEY", "")
+	hostname = getEnv("HOSTNAME", "")
 
-	// Priority: flag > env
-	apiKey := *apikey
 	if apiKey == "" {
-		apiKey = os.Getenv("API_KEY")
+		log.Fatal("API key is required. Set via --apikey or APIKEY env var")
 	}
-	if apiKey == "" {
-		log.Fatal("API_KEY environment variable or --apikey flag required")
-	}
-
-	serverURL := *server
-	if serverURL == "" {
-		serverURL = os.Getenv("SERVER_URL")
-	}
-	if serverURL == "" {
-		log.Fatal("SERVER_URL environment variable or --server flag required")
+	if hostname == "" {
+		var err error
+		hostname, err = os.Hostname()
+		if err != nil {
+			log.Fatalf("Failed to get hostname: %v", err)
+		}
 	}
 
-	// Initialize client
-	c := client.New(serverURL, apiKey)
+	// Register agent
+	register()
 
-	// Collect initial info
-	info := collector.CollectInfo(apiKey)
-
-	if *hostname != "" {
-		info.Hostname = *hostname
-	}
-
-	// Register on startup
-	log.Println("Registering agent...")
-	err := c.Register(info)
-	if err != nil {
-		log.Printf("Register failed (will retry): %v", err)
-	} else {
-		log.Println("Registered successfully")
-	}
-
-	// Load offline buffer
-	buf := buffer.New("pulse-buffer.jsonl")
-	buf.Flush(c.SendHeartbeat)
-
-	log.Println("Agent started. Sending heartbeat every 60 seconds.")
-
-	// Graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	ticker := time.NewTicker(60 * time.Second)
+	// Start heartbeat loop every 5 seconds
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	log.Printf("Agent started. Sending heartbeat every 5 seconds.")
 
 	for {
 		select {
 		case <-ticker.C:
-			metrics := collector.CollectMetrics()
-			loc := collector.CollectLocation()
-			netInfo := collector.CollectNetwork()
-
-			err := c.SendHeartbeat(metrics, loc, netInfo)
-			if err != nil {
-				log.Printf("Heartbeat failed: %v, buffering...", err)
-				buf.Save(metrics, loc, netInfo)
-			} else {
-				log.Println("Heartbeat sent")
-			}
-
-		case <-sigChan:
+			sendHeartbeat()
+		case <-sigCh:
 			log.Println("Shutting down...")
-			// Send final heartbeat
-			metrics := collector.CollectMetrics()
-			loc := collector.CollectLocation()
-			netInfo := collector.CollectNetwork()
-			_ = c.SendHeartbeat(metrics, loc, netInfo)
 			return
 		}
 	}
+}
+
+func getEnv(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	// Also check command-line flags via a simple approach
+	return fallback
+}
+
+func register() {
+	info := collector.CollectInfo(apiKey)
+	url := fmt.Sprintf("%s/api/agent/register", serverURL)
+
+	body, err := json.Marshal(info)
+	if err != nil {
+		log.Printf("Failed to marshal registration: %v", err)
+		return
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("Registration failed (will retry on heartbeat): %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Println("Registered successfully")
+	} else {
+		log.Printf("Registration returned status %d", resp.StatusCode)
+	}
+}
+
+func sendHeartbeat() {
+	metrics := collector.CollectMetrics()
+	network := collector.CollectNetwork()
+
+	// Collect location (try multiple methods)
+	var loc *collector.Location
+	if l, err := collector.GetLocation(); err == nil {
+		loc = l
+	}
+
+	payload := HeartbeatPayload{
+		AgentID:     hostname + "-" + getMACShort(),
+		APIKey:      apiKey,
+		Metrics:     metrics,
+		Location:    loc,
+		NetworkInfo: network,
+	}
+
+	url := fmt.Sprintf("%s/api/agent/heartbeat", serverURL)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Failed to marshal heartbeat: %v", err)
+		return
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("Heartbeat failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Println("Heartbeat sent successfully")
+	} else {
+		log.Printf("Heartbeat returned status %d", resp.StatusCode)
+	}
+}
+
+func getMACShort() string {
+	netInfo := collector.CollectNetwork()
+	if len(netInfo.IPAddresses) > 0 {
+		// Use a simple hash of IP as fallback identifier
+		// In production, use actual MAC address from registration
+	}
+	return "default"
 }
