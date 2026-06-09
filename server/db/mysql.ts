@@ -90,6 +90,8 @@ interface MetricsInput {
   uptime_seconds: number;
   network_status: string;
   network_latency_ms: number;
+  ping_latency_ms?: number;
+  error_count?: number;
   gateway_reachable?: boolean;
   dns_working?: boolean;
   internet_reachable?: boolean;
@@ -105,14 +107,16 @@ export async function insertMetrics(agentId: string, m: MetricsInput): Promise<v
       (agent_id, cpu_percent, ram_percent, ram_used_bytes, ram_total_bytes,
        storage_percent, storage_used_bytes, storage_total_bytes,
        uptime_seconds, network_status, network_latency_ms,
+       ping_latency_ms, error_count,
        gateway_reachable, dns_working, internet_reachable, default_gateway,
        disk_health_status, disk_temperature_c, recorded_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       agentId,
       m.cpu_percent, m.ram_percent, m.ram_used_bytes, m.ram_total_bytes,
       m.storage_percent, m.storage_used_bytes, m.storage_total_bytes,
       m.uptime_seconds, m.network_status, m.network_latency_ms,
+      m.ping_latency_ms ?? null, m.error_count ?? null,
       m.gateway_reachable ?? null, m.dns_working ?? null, m.internet_reachable ?? null,
       m.default_gateway ?? null,
       m.disk_health_status ?? null, m.disk_temperature_c ?? null,
@@ -129,7 +133,7 @@ export async function queryMetrics(
     `SELECT
        recorded_at AS time,
        cpu_percent, ram_percent, storage_percent,
-       network_status, network_latency_ms,
+       network_status, network_latency_ms, ping_latency_ms, error_count,
        disk_health_status, disk_temperature_c
      FROM agent_metrics
      WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)

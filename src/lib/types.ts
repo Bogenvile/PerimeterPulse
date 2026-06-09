@@ -32,6 +32,8 @@ export interface ExtendedAgentMetrics {
   uptime_seconds: number;
   network_status: "up" | "down" | "degraded";
   network_latency_ms: number;
+  ping_latency_ms?: number;
+  error_count?: number;
   disk_health_status: "ok" | "warning" | "critical" | "unknown";
   disk_temperature_c: number;
   timestamp: string;
@@ -42,6 +44,8 @@ export interface AgentLocation {
   longitude: number;
   accuracy_meters: number;
   source: "os" | "geoip";
+  city?: string;
+  country?: string;
   timestamp: string;
 }
 
@@ -55,6 +59,8 @@ export interface ExtendedHeartbeatPayload {
     wifi_signal_dbm: number;
     network_speed_mbps: number;
     ip_addresses: string[];
+    wifi_ip?: string;
+    gateway_ip?: string;
   };
 }
 
@@ -95,11 +101,17 @@ export interface ExtendedAsset {
   disk_temperature_c: number | null;
   wifi_ssid: string;
   wifi_signal_dbm: number | null;
+  wifi_ip: string;
+  gateway_ip: string;
   network_speed_mbps: number;
+  ping_latency_ms: number | null;
+  error_count: number;
   status: AgentStatus;
   last_seen_at: string | null;
   last_location_lat: number | null;
   last_location_lng: number | null;
+  city: string;
+  country: string;
   created_at: string;
   updated_at: string;
 }
@@ -111,6 +123,8 @@ export interface MetricsDataPoint {
   storage_percent: number;
   network_status: string;
   network_latency_ms: number;
+  ping_latency_ms?: number;
+  error_count?: number;
   disk_health_status?: string;
   disk_temperature_c?: number;
 }

@@ -13,8 +13,10 @@ export default defineHandler(async (event) => {
             mac_addresses, ip_addresses, cpu_model, cpu_cores,
             ram_total_bytes, storage_total_bytes,
             disk_model, disk_type, disk_health_status, disk_temperature_c,
-            wifi_ssid, wifi_signal_dbm, network_speed_mbps,
+            wifi_ssid, wifi_signal_dbm, wifi_ip, gateway_ip,
+            network_speed_mbps, ping_latency_ms, error_count,
             status, last_seen_at, last_location_lat, last_location_lng,
+            city, country,
             created_at, updated_at
      FROM assets WHERE id = ? OR agent_id = ?`,
     [id, id],
@@ -31,6 +33,8 @@ export default defineHandler(async (event) => {
     cpu_cores: row.cpu_cores ?? 0,
     wifi_signal_dbm: row.wifi_signal_dbm ?? null,
     disk_temperature_c: row.disk_temperature_c ?? null,
+    ping_latency_ms: row.ping_latency_ms ?? null,
+    error_count: row.error_count ?? 0,
   };
 });
 

@@ -10,6 +10,8 @@ interface HeartbeatBody {
     storage_percent: number; storage_used_bytes: number; storage_total_bytes: number;
     uptime_seconds: number; network_status: "up" | "down" | "degraded";
     network_latency_ms: number;
+    ping_latency_ms?: number;
+    error_count?: number;
     gateway_reachable?: boolean; dns_working?: boolean; internet_reachable?: boolean;
     default_gateway?: string;
     disk_health_status?: string; disk_temperature_c?: number;
@@ -18,10 +20,12 @@ interface HeartbeatBody {
   location?: {
     latitude: number; longitude: number; accuracy_meters: number;
     source: "os" | "geoip"; timestamp: string;
+    city?: string; country?: string;
   };
   network_info?: {
     wifi_ssid: string; wifi_signal_dbm: number;
     network_speed_mbps: number; ip_addresses: string[];
+    wifi_ip?: string; gateway_ip?: string;
   };
 }
 
@@ -48,24 +52,35 @@ export default defineHandler(async (event) => {
   if (asset) {
     const status = determineStatus(body.metrics);
     const net = body.network_info;
+    const loc = body.location;
+
     await query(
       `UPDATE assets SET
         status=?, last_seen_at=NOW(),
         last_location_lat=COALESCE(?, last_location_lat),
         last_location_lng=COALESCE(?, last_location_lng),
+        city=COALESCE(NULLIF(?,''), city),
+        country=COALESCE(NULLIF(?,''), country),
         disk_health_status=COALESCE(?, disk_health_status),
         disk_temperature_c=COALESCE(?, disk_temperature_c),
         wifi_ssid=COALESCE(NULLIF(?,''), wifi_ssid),
         wifi_signal_dbm=COALESCE(?, wifi_signal_dbm),
+        wifi_ip=COALESCE(NULLIF(?,''), wifi_ip),
+        gateway_ip=COALESCE(NULLIF(?,''), gateway_ip),
         network_speed_mbps=COALESCE(?, network_speed_mbps),
+        ping_latency_ms=COALESCE(?, ping_latency_ms),
+        error_count=COALESCE(?, error_count),
         ip_addresses=COALESCE(?, ip_addresses)
        WHERE agent_id=?`,
       [
         status,
-        body.location?.latitude ?? null, body.location?.longitude ?? null,
+        loc?.latitude ?? null, loc?.longitude ?? null,
+        loc?.city ?? null, loc?.country ?? null,
         body.metrics?.disk_health_status ?? null, body.metrics?.disk_temperature_c ?? null,
         net?.wifi_ssid ?? null, net?.wifi_signal_dbm ?? null,
+        net?.wifi_ip ?? null, net?.gateway_ip ?? null,
         net?.network_speed_mbps ?? null,
+        body.metrics?.ping_latency_ms ?? null, body.metrics?.error_count ?? null,
         net?.ip_addresses ? JSON.stringify(net.ip_addresses) : null,
         body.agent_id,
       ],
@@ -77,7 +92,6 @@ export default defineHandler(async (event) => {
 
 function determineStatus(m?: HeartbeatBody["metrics"]): "online"|"warning"|"critical" {
   if (!m) return "online";
-  // Only mark critical if something is dangerously high
   if (m.cpu_percent > 98 || m.ram_percent > 98 || m.storage_percent > 99 || m.disk_health_status === "critical") return "critical";
   if (m.cpu_percent > 90 || m.ram_percent > 90 || m.storage_percent > 95 || m.disk_health_status === "warning") return "warning";
   return "online";

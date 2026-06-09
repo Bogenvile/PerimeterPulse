@@ -1,8 +1,11 @@
 package collector
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -21,6 +24,8 @@ type Metrics struct {
 	UptimeSeconds     uint64  `json:"uptime_seconds"`
 	NetworkStatus     string  `json:"network_status"`
 	NetworkLatencyMs  float64 `json:"network_latency_ms"`
+	PingLatencyMs     float64 `json:"ping_latency_ms"`
+	ErrorCount        int     `json:"error_count"`
 	Timestamp         string  `json:"timestamp"`
 }
 
@@ -29,6 +34,8 @@ type NetworkInfo struct {
 	WiFiSignalDBM int      `json:"wifi_signal_dbm"`
 	SpeedMbps     int      `json:"network_speed_mbps"`
 	IPAddresses   []string `json:"ip_addresses"`
+	WiFiIP        string   `json:"wifi_ip"`
+	GatewayIP     string   `json:"gateway_ip"`
 }
 
 type Location struct {
@@ -36,26 +43,28 @@ type Location struct {
 	Longitude      float64 `json:"longitude"`
 	AccuracyMeters float64 `json:"accuracy_meters"`
 	Source         string  `json:"source"`
+	City           string  `json:"city,omitempty"`
+	Country        string  `json:"country,omitempty"`
 	Timestamp      string  `json:"timestamp"`
 }
 
 type RegistrationInfo struct {
-	Hostname         string   `json:"hostname"`
-	OS               string   `json:"os"`
-	OSVersion        string   `json:"os_version"`
-	AgentVersion     string   `json:"agent_version"`
-	APIKey           string   `json:"api_key"`
-	MACAddresses     []string `json:"mac_addresses"`
-	IPAddresses      []string `json:"ip_addresses"`
-	CPUModel         string   `json:"cpu_model"`
-	CPUCores         int      `json:"cpu_cores"`
-	RAMTotalBytes    uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64  `json:"storage_total_bytes"`
-	DiskModel        string   `json:"disk_model"`
-	DiskType         string   `json:"disk_type"`
-	WiFiSSID         string   `json:"wifi_ssid"`
-	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int      `json:"network_speed_mbps"`
+	Hostname          string   `json:"hostname"`
+	OS                string   `json:"os"`
+	OSVersion         string   `json:"os_version"`
+	AgentVersion      string   `json:"agent_version"`
+	APIKey            string   `json:"api_key"`
+	MACAddresses      []string `json:"mac_addresses"`
+	IPAddresses       []string `json:"ip_addresses"`
+	CPUModel          string   `json:"cpu_model"`
+	CPUCores          int      `json:"cpu_cores"`
+	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	DiskModel         string   `json:"disk_model"`
+	DiskType          string   `json:"disk_type"`
+	WiFiSSID          string   `json:"wifi_ssid"`
+	WiFiSignalDBM     int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps  int      `json:"network_speed_mbps"`
 }
 
 func CollectInfo(apiKey string) *RegistrationInfo {
@@ -85,8 +94,8 @@ func CollectInfo(apiKey string) *RegistrationInfo {
 		info.DiskType = getDiskType()
 		info.MACAddresses = getMACs()
 		info.IPAddresses = getIPs()
-		info.WiFiSSID = psString("(Get-NetConnectionProfile).Name")
-		info.WiFiSignalDBM = wifiSignal()
+		info.WiFiSSID = getWiFiSSID()
+		info.WiFiSignalDBM = getWiFiSignalDBM()
 		info.NetworkSpeedMbps = psInt("(Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -First 1).LinkSpeed", 100)
 	}
 
@@ -115,9 +124,14 @@ func CollectMetrics() *Metrics {
 			m.StorageUsedBytes = m.StorageTotalBytes - freeBytes
 			m.StoragePercent = float64(m.StorageUsedBytes) / float64(m.StorageTotalBytes) * 100
 		}
-		m.UptimeSeconds = uptime()
-		m.NetworkLatencyMs = pingLatency()
+		m.UptimeSeconds = getUptime()
+		m.PingLatencyMs = pingLatency()
+		m.NetworkLatencyMs = m.PingLatencyMs
+		m.ErrorCount = getSystemErrorCount()
 		m.NetworkStatus = "up"
+		if m.PingLatencyMs == 0 {
+			m.NetworkStatus = "down"
+		}
 	}
 
 	return m
@@ -128,15 +142,20 @@ func CollectNetwork() *NetworkInfo {
 		IPAddresses: getIPs(),
 	}
 	if runtime.GOOS == "windows" {
-		n.WiFiSSID = psString("(Get-NetConnectionProfile).Name")
-		n.WiFiSignalDBM = wifiSignal()
+		n.WiFiSSID = getWiFiSSID()
+		n.WiFiSignalDBM = getWiFiSignalDBM()
 		n.SpeedMbps = psInt("(Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -First 1).LinkSpeed", 100)
+		n.WiFiIP = getWiFiIP()
+		n.GatewayIP = getDefaultGateway()
 	}
 	return n
 }
 
 func CollectLocation() *Location {
-	// Stub — implement real geo-location if needed
+	loc := geoIPLocation()
+	if loc != nil {
+		return loc
+	}
 	return &Location{
 		Latitude:       0,
 		Longitude:      0,
@@ -144,6 +163,53 @@ func CollectLocation() *Location {
 		Source:         "unknown",
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+// ======== WiFi-specific ========
+
+func getWiFiSSID() string {
+	s := psString("(Get-NetConnectionProfile).Name")
+	if s != "" {
+		return s
+	}
+	s = psString("netsh wlan show interfaces | Select-String 'SSID' | Select-Object -First 1 | ForEach-Object { $_ -replace '.*:\\s*', '' }")
+	return strings.TrimSpace(s)
+}
+
+func getWiFiSignalDBM() int {
+	s := psString("netsh wlan show interfaces | Select-String 'Signal' | Select-Object -First 1 | ForEach-Object { [int]($_ -replace '.*:\\s*|%', '') }")
+	if s == "" {
+		return 0
+	}
+	var pct int
+	fmt.Sscanf(s, "%d", &pct)
+	if pct > 0 {
+		return -30 - (100-pct)*60/100
+	}
+	return 0
+}
+
+func getWiFiIP() string {
+	s := psString("(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias '*Wi-Fi*' | Select-Object -First 1).IPAddress")
+	if s != "" {
+		return s
+	}
+	s = psString("(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias '*Wireless*' | Select-Object -First 1).IPAddress")
+	return s
+}
+
+func getDefaultGateway() string {
+	return psString("(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -First 1).NextHop")
+}
+
+func getSystemErrorCount() int {
+	s := psString("(Get-WinEvent -FilterHashtable @{LogName='System'; Level=2; StartTime=(Get-Date).AddHours(-1)} -ErrorAction SilentlyContinue).Count")
+	if s == "" {
+		return 0
+	}
+	var c int
+	fmt.Sscanf(s, "%d", &c)
+	return c
 }
 
 // ======== Helpers ========
@@ -212,17 +278,7 @@ func getDiskType() string {
 	return "SSD"
 }
 
-func wifiSignal() int {
-	s := psString("(netsh wlan show interfaces | Select-String 'Signal' | ForEach-Object {[int]($_ -replace '.*:\\\\s*|%', '')})")
-	if s == "" {
-		return 0
-	}
-	var v int
-	fmt.Sscanf(s, "%d", &v)
-	return v
-}
-
-func uptime() uint64 {
+func getUptime() uint64 {
 	if runtime.GOOS == "windows" {
 		s := psString("(Get-CimInstance Win32_OperatingSystem).LastBootUpTime")
 		if len(s) >= 14 {
@@ -250,10 +306,56 @@ func pingLatency() float64 {
 			return ms
 		}
 	}
+	if idx := strings.Index(output, "time="); idx != -1 {
+		part := output[idx+5:]
+		if end := strings.Index(part, "ms"); end != -1 {
+			var ms float64
+			fmt.Sscanf(part[:end], "%f", &ms)
+			return ms
+		}
+	}
 	return 0
 }
 
-// PowerShell helpers
+// GeoIP location from ip-api.com
+func geoIPLocation() *Location {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://ip-api.com/json/?fields=lat,lon,city,country,status")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	var result struct {
+		Status  string  `json:"status"`
+		Lat     float64 `json:"lat"`
+		Lon     float64 `json:"lon"`
+		City    string  `json:"city"`
+		Country string  `json:"country"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil
+	}
+
+	if result.Status != "success" {
+		return nil
+	}
+
+	return &Location{
+		Latitude:       result.Lat,
+		Longitude:      result.Lon,
+		AccuracyMeters: 5000,
+		Source:         "geoip",
+		City:           result.City,
+		Country:        result.Country,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+	}
+}
 
 func psString(script string) string {
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)

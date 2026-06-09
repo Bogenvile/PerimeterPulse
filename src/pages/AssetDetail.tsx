@@ -6,7 +6,7 @@ import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
-  Loader2, AlertCircle, Monitor, MapPin,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, setApiToken } from "@/lib/api";
@@ -25,6 +25,15 @@ function wifiSignalLabel(dbm: number | null): { text: string; color: string } {
   if (dbm >= -65) return { text: "Good", color: "text-blue-400" };
   if (dbm >= -75) return { text: "Fair", color: "text-amber-400" };
   return { text: "Weak", color: "text-red-400" };
+}
+
+function getHealthColor(status?: string): string {
+  switch (status) {
+    case "ok": return "text-emerald-400";
+    case "warning": return "text-amber-400";
+    case "critical": return "text-red-400";
+    default: return "text-muted-foreground";
+  }
 }
 
 const timeRangeOptions = [
@@ -104,9 +113,11 @@ const AssetDetailPage = () => {
   }
 
   const signalInfo = wifiSignalLabel(asset.wifi_signal_dbm);
+  const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
 
   return (
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate("/assets")}
@@ -123,15 +134,21 @@ const AssetDetailPage = () => {
             {asset.os} {asset.os_version} • Agent v{asset.agent_version} •{" "}
             <code className="text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">{asset.agent_id}</code>
           </p>
+          {asset.city && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+              <Globe className="h-3 w-3" /> {asset.city}{asset.country ? `, ${asset.country}` : ""}
+            </p>
+          )}
         </div>
       </div>
 
+      {/* Row 1: Hardware */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Cpu className="h-4 w-4" /><span className="text-xs">CPU</span>
           </div>
-          <p className="text-sm font-semibold">{asset.cpu_model}</p>
+          <p className="text-sm font-semibold truncate" title={asset.cpu_model}>{asset.cpu_model}</p>
           <p className="text-xs text-muted-foreground">{asset.cpu_cores} cores</p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
@@ -139,12 +156,14 @@ const AssetDetailPage = () => {
             <HardDrive className="h-4 w-4" /><span className="text-xs">RAM</span>
           </div>
           <p className="text-sm font-semibold">{formatBytes(asset.ram_total_bytes)}</p>
+          {latest && <p className="text-xs text-muted-foreground">{latest.ram_percent.toFixed(1)}% used</p>}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Disc className="h-4 w-4" /><span className="text-xs">Storage</span>
           </div>
           <p className="text-sm font-semibold">{formatBytes(asset.storage_total_bytes)}</p>
+          {latest && <p className="text-xs text-muted-foreground">{latest.storage_percent.toFixed(1)}% used</p>}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -155,19 +174,16 @@ const AssetDetailPage = () => {
         </Card>
       </div>
 
+      {/* Row 2: Disk, Temp, WiFi, Link Speed */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Disc className="h-4 w-4" /><span className="text-xs">Disk</span>
           </div>
-          <p className="text-sm font-semibold truncate">{asset.disk_model || "Unknown"}</p>
+          <p className="text-sm font-semibold truncate" title={asset.disk_model}>{asset.disk_model || "Unknown"}</p>
           <p className="text-xs">
             {asset.disk_type || "unknown"} •{" "}
-            <span className={
-              asset.disk_health_status === "ok" ? "text-emerald-400" :
-              asset.disk_health_status === "warning" ? "text-amber-400" :
-              asset.disk_health_status === "critical" ? "text-red-400" : "text-muted-foreground"
-            }>
+            <span className={getHealthColor(asset.disk_health_status)}>
               {asset.disk_health_status || "unknown"}
             </span>
           </p>
@@ -201,6 +217,39 @@ const AssetDetailPage = () => {
         </Card>
       </div>
 
+      {/* Row 3: WiFi IP, Gateway, Ping Latency, Error Count */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Wifi className="h-4 w-4" /><span className="text-xs">WiFi IP</span>
+          </div>
+          <p className="text-sm font-semibold font-mono">{asset.wifi_ip || "N/A"}</p>
+        </Card>
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Network className="h-4 w-4" /><span className="text-xs">Gateway</span>
+          </div>
+          <p className="text-sm font-semibold font-mono">{asset.gateway_ip || "N/A"}</p>
+        </Card>
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Network className="h-4 w-4" /><span className="text-xs">Ping 8.8.8.8</span>
+          </div>
+          <p className="text-sm font-semibold">
+            {asset.ping_latency_ms != null ? `${asset.ping_latency_ms.toFixed(1)} ms` : "N/A"}
+          </p>
+        </Card>
+        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Bug className="h-4 w-4" /><span className="text-xs">System Errors (1h)</span>
+          </div>
+          <p className={`text-sm font-semibold ${asset.error_count > 0 ? "text-red-400" : "text-emerald-400"}`}>
+            {asset.error_count}
+          </p>
+        </Card>
+      </div>
+
+      {/* Time Range Selector */}
       <div className="flex items-center gap-1.5">
         {timeRangeOptions.map((opt) => (
           <button
@@ -217,15 +266,14 @@ const AssetDetailPage = () => {
         ))}
       </div>
 
+      {/* Charts */}
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <h3 className="mb-3 text-sm font-semibold">CPU Usage</h3>
           {metrics.length > 0 ? (
             <MetricsChart data={metrics} metric="cpu_percent" color="#60a5fa" height={200} />
           ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">
-              {metrics.length === 0 ? "Waiting for agent heartbeat..." : "Loading..."}
-            </p>
+            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
           )}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
@@ -245,21 +293,26 @@ const AssetDetailPage = () => {
           )}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <h3 className="mb-3 text-sm font-semibold">Network Latency</h3>
+          <h3 className="mb-3 text-sm font-semibold">Ping Latency (8.8.8.8)</h3>
           {metrics.length > 0 ? (
-            <MetricsChart data={metrics} metric="network_latency_ms" color="#34d399" height={200} />
+            <MetricsChart data={metrics} metric="ping_latency_ms" color="#34d399" height={200} />
           ) : (
             <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
           )}
         </Card>
       </div>
 
+      {/* Location */}
       <Card className="overflow-hidden border-white/[0.06] bg-white/[0.02] p-0">
         <div className="border-b border-white/[0.06] px-5 py-3 flex items-center gap-2">
           <MapPin className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-sm font-semibold">Location History</h3>
+          {asset.city && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              {asset.city}{asset.country ? `, ${asset.country}` : ""}
+            </span>
+          )}
         </div>
-        {/* Wrap MapView in a try/catch by using a conditional render */}
         {typeof window !== "undefined" && asset.last_location_lat != null && asset.last_location_lng != null ? (
           <MapView
             assets={[asset]}
