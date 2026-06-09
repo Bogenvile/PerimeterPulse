@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
@@ -6,7 +6,7 @@ import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
-  Loader2, AlertCircle, Monitor,
+  Loader2, AlertCircle, Monitor, MapPin,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, setApiToken } from "@/lib/api";
@@ -49,10 +49,18 @@ const AssetDetailPage = () => {
     if (!token || !id) return;
     setApiToken(token);
     setLoading(true);
+    setError("");
+
     Promise.all([
-      getAsset(id),
-      getAssetMetrics(id, timeRange),
-      getAssetLocations(id, "-24h"),
+      getAsset(id).catch((e) => { throw new Error("Asset: " + e.message); }),
+      getAssetMetrics(id, timeRange).catch((e) => {
+        console.warn("Metrics fetch failed, continuing without", e);
+        return [] as MetricsDataPoint[];
+      }),
+      getAssetLocations(id, "-24h").catch((e) => {
+        console.warn("Locations fetch failed, continuing without", e);
+        return [] as LocationDataPoint[];
+      }),
     ])
       .then(([a, m, l]) => {
         setAsset(a);
@@ -215,7 +223,9 @@ const AssetDetailPage = () => {
           {metrics.length > 0 ? (
             <MetricsChart data={metrics} metric="cpu_percent" color="#60a5fa" height={200} />
           ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">No metrics data yet</p>
+            <p className="text-xs text-muted-foreground py-8 text-center">
+              {metrics.length === 0 ? "Waiting for agent heartbeat..." : "Loading..."}
+            </p>
           )}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
@@ -223,7 +233,7 @@ const AssetDetailPage = () => {
           {metrics.length > 0 ? (
             <MetricsChart data={metrics} metric="ram_percent" color="#a78bfa" height={200} />
           ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">No metrics data yet</p>
+            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
           )}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
@@ -231,7 +241,7 @@ const AssetDetailPage = () => {
           {metrics.length > 0 ? (
             <MetricsChart data={metrics} metric="storage_percent" color="#fbbf24" height={200} />
           ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">No metrics data yet</p>
+            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
           )}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
@@ -239,25 +249,29 @@ const AssetDetailPage = () => {
           {metrics.length > 0 ? (
             <MetricsChart data={metrics} metric="network_latency_ms" color="#34d399" height={200} />
           ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">No metrics data yet</p>
+            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
           )}
         </Card>
       </div>
 
       <Card className="overflow-hidden border-white/[0.06] bg-white/[0.02] p-0">
-        <div className="border-b border-white/[0.06] px-5 py-3">
+        <div className="border-b border-white/[0.06] px-5 py-3 flex items-center gap-2">
+          <MapPin className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-sm font-semibold">Location History</h3>
         </div>
-        <MapView
-          assets={[asset]}
-          center={
-            asset.last_location_lat && asset.last_location_lng
-              ? [asset.last_location_lat, asset.last_location_lng]
-              : [40, -40]
-          }
-          zoom={12}
-          className="h-[320px] rounded-none border-0"
-        />
+        {/* Wrap MapView in a try/catch by using a conditional render */}
+        {typeof window !== "undefined" && asset.last_location_lat != null && asset.last_location_lng != null ? (
+          <MapView
+            assets={[asset]}
+            center={[asset.last_location_lat, asset.last_location_lng]}
+            zoom={12}
+            className="h-[320px] rounded-none border-0"
+          />
+        ) : (
+          <div className="flex items-center justify-center h-[320px] text-muted-foreground text-sm">
+            No location data available
+          </div>
+        )}
       </Card>
     </div>
   );

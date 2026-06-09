@@ -77,7 +77,8 @@ export default defineHandler(async (event) => {
 
 function determineStatus(m?: HeartbeatBody["metrics"]): "online"|"warning"|"critical" {
   if (!m) return "online";
-  if (m.cpu_percent>95||m.ram_percent>95||m.storage_percent>98||m.disk_health_status==="critical") return "critical";
-  if (m.cpu_percent>80||m.ram_percent>80||m.storage_percent>90||m.disk_health_status==="warning") return "warning";
+  // Only mark critical if something is dangerously high
+  if (m.cpu_percent > 98 || m.ram_percent > 98 || m.storage_percent > 99 || m.disk_health_status === "critical") return "critical";
+  if (m.cpu_percent > 90 || m.ram_percent > 90 || m.storage_percent > 95 || m.disk_health_status === "warning") return "warning";
   return "online";
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -25,6 +25,10 @@ export function AppLayout() {
   const { user, token, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const [showApiKeys, setShowApiKeys] = useState(false);
+
+  useEffect(() => {
+    document.title = "PerimeterPulse";
+  }, []);
 
   if (token) {
     setApiToken(token);
