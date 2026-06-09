@@ -13,12 +13,12 @@ import type { MetricsDataPoint } from "@/lib/types";
 
 interface MetricsChartProps {
   data: MetricsDataPoint[];
-  metric: "cpu_percent" | "ram_percent" | "storage_percent" | "network_latency_ms";
+  metric: "cpu_percent" | "ram_percent" | "storage_percent" | "network_latency_ms" | "ping_latency_ms";
   color?: string;
   height?: number;
 }
 
-const metricConfig = {
+const metricConfig: Record<string, { label: string; color: string; unit: string; domain: [number, number | string] }> = {
   cpu_percent: {
     label: "CPU %",
     color: "#60a5fa",
@@ -43,6 +43,12 @@ const metricConfig = {
     unit: "ms",
     domain: [0, "auto"] as [number, number | string],
   },
+  ping_latency_ms: {
+    label: "Ping ms",
+    color: "#34d399",
+    unit: "ms",
+    domain: [0, "auto"] as [number, number | string],
+  },
 };
 
 function formatValue(value: unknown, unit: string): string {
@@ -58,6 +64,13 @@ export function MetricsChart({
   height = 220,
 }: MetricsChartProps) {
   const config = metricConfig[metric];
+  if (!config) {
+    return (
+      <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+        Unknown metric: {metric}
+      </div>
+    );
+  }
 
   const formattedData = useMemo(
     () =>
