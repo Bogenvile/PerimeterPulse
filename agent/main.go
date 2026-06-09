@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -30,15 +29,15 @@ func main() {
 		}
 	}
 
-	client := client.New(*server)
+	c := client.New(*server)
 
 	// Registrasi
 	registerBody := map[string]interface{}{
-		"hostname":  *hostname,
-		"api_key":   *apiKey,
+		"hostname": *hostname,
+		"api_key":  *apiKey,
 	}
 	log.Printf("Registering agent: %s", *hostname)
-	resp, err := client.Register(registerBody)
+	resp, err := c.Register(registerBody)
 	if err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
@@ -49,16 +48,15 @@ func main() {
 	}
 	log.Printf("Registered as agent: %s", agentID)
 
-	// Simpan agentID & apiKey untuk heartbeat
 	state := struct {
 		AgentID string
 		APIKey  string
 	}{agentID, *apiKey}
 
-	// Kirim heartbeat pertama setelah registrasi
-	sendHeartbeat(client, &state)
+	// Kirim heartbeat pertama
+	sendHeartbeat(c, &state)
 
-	// Mulai loop heartbeat setiap 60 detik
+	// Loop setiap 60 detik
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
@@ -68,7 +66,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			sendHeartbeat(client, &state)
+			sendHeartbeat(c, &state)
 		case <-sig:
 			log.Println("Shutting down...")
 			return
@@ -78,8 +76,8 @@ func main() {
 
 func sendHeartbeat(c *client.Client, state *struct{ AgentID, APIKey string }) {
 	metrics := collector.CollectMetrics()
-	if metrics == nil {
-		log.Println("CollectMetrics returned nil, skipping heartbeat")
+	if len(metrics.CPUPercent) == 0 && len(metrics.RAMPercent) == 0 {
+		log.Println("Metrics appear empty, skipping heartbeat")
 		return
 	}
 
