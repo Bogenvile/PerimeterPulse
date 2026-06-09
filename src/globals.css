@@ -126,31 +126,51 @@
   }
 }
 
-/* Leaflet overrides - dark & light */
+/* ── Leaflet Map ── */
+
 .leaflet-container {
   background: hsl(var(--background)) !important;
   font-family: inherit !important;
 }
 
 .dark .leaflet-tile-pane {
-  filter: brightness(0.6) invert(0.9) hue-rotate(180deg) saturate(0.3);
+  filter: brightness(0.6) invert(1) hue-rotate(180deg) saturate(0.4) contrast(1.1);
 }
 
 .leaflet-control-zoom a {
   background: hsl(var(--card)) !important;
   color: hsl(var(--foreground)) !important;
   border-color: hsl(var(--border)) !important;
+  border-radius: 0.5rem !important;
+}
+
+.leaflet-control-zoom {
+  border: none !important;
+  border-radius: 0.5rem !important;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12) !important;
 }
 
 .leaflet-popup-content-wrapper {
   background: hsl(var(--popover)) !important;
   color: hsl(var(--foreground)) !important;
-  border-radius: 0.5rem !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.25) !important;
+  border: 1px solid hsl(var(--border)) !important;
 }
 
 .leaflet-popup-tip {
   background: hsl(var(--popover)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-top: none !important;
+  border-left: none !important;
 }
+
+.leaflet-popup-content {
+  margin: 12px 14px !important;
+}
+
+/* ── Animations ── */
 
 @keyframes pulse-ring {
   0% { transform: scale(0.8); opacity: 0.6; }
@@ -168,4 +188,34 @@
 
 .animate-fade-in {
   animation: fade-in 0.4s ease-out;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out both;
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.3s ease-out both;
+}
+
+/* ── Sidebar transition ── */
+
+.sidebar-transition {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-label {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  white-space: nowrap;
 }

@@ -34,6 +34,10 @@ export async function getAsset(id: string): Promise<ExtendedAsset> {
   return fetchApi<ExtendedAsset>(`/assets/${encodeURIComponent(id)}`);
 }
 
+export async function deleteAsset(id: string): Promise<void> {
+  await fetchApi(`/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export async function getAssetMetrics(
   id: string,
   range?: string,

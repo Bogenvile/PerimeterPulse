@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
+import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
   Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, setApiToken } from "@/lib/api";
+import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
+import { computeEffectiveStatus } from "@/lib/status";
+import { showSuccess, showError } from "@/utils/toast";
 import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ErrorLogItem } from "@/lib/types";
 
 function fmt(n: unknown): number {
@@ -54,7 +57,7 @@ const timeRangeOptions = [
 
 const AssetDetailPage = () => {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
+  const { token, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [asset, setAsset] = useState<ExtendedAsset | null>(null);
   const [metrics, setMetrics] = useState<MetricsDataPoint[]>([]);
@@ -65,6 +68,7 @@ const AssetDetailPage = () => {
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
   const [loadingErrors, setLoadingErrors] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -75,11 +79,11 @@ const AssetDetailPage = () => {
     Promise.all([
       getAsset(id).catch((e) => { throw new Error("Asset: " + e.message); }),
       getAssetMetrics(id, timeRange).catch((e) => {
-        console.warn("Metrics fetch failed, continuing without", e);
+        console.warn("Metrics fetch failed", e);
         return [] as MetricsDataPoint[];
       }),
       getAssetLocations(id, "-24h").catch((e) => {
-        console.warn("Locations fetch failed, continuing without", e);
+        console.warn("Locations fetch failed", e);
         return [] as LocationDataPoint[];
       }),
     ])
@@ -92,7 +96,6 @@ const AssetDetailPage = () => {
       .finally(() => setLoading(false));
   }, [token, id, timeRange]);
 
-  // Fetch real error logs when dialog opens
   useEffect(() => {
     if (!showErrorDetail || !id || !token) return;
     setLoadingErrors(true);
@@ -102,6 +105,20 @@ const AssetDetailPage = () => {
       .catch(() => setErrorLogs([]))
       .finally(() => setLoadingErrors(false));
   }, [showErrorDetail, id, token]);
+
+  const handleDelete = useCallback(async () => {
+    if (!asset) return;
+    setDeleting(true);
+    try {
+      await deleteAsset(asset.id);
+      showSuccess(`${asset.hostname} deleted`);
+      navigate("/assets", { replace: true });
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Failed to delete");
+    } finally {
+      setDeleting(false);
+    }
+  }, [asset, navigate]);
 
   if (loading) {
     return (
@@ -135,28 +152,38 @@ const AssetDetailPage = () => {
     );
   }
 
+  const effectiveStatus = computeEffectiveStatus(asset);
   const signalInfo = wifiSignalLabel(asset.wifi_signal_dbm);
   const hasSignal = !isNoSignal(asset.wifi_signal_dbm);
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
-
   const errorHistory = metrics.filter((m) => Number(m.error_count) > 0);
+
+  const mapAsset = {
+    ...asset,
+    status: effectiveStatus,
+  };
 
   return (
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <button
           onClick={() => navigate("/assets")}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.06] hover:bg-white/[0.04] transition-colors"
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.06] hover:bg-white/[0.04] transition-colors mt-0.5"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-bold">{asset.hostname}</h1>
-            <AgentStatusBadge status={asset.status} />
+            <AgentStatusBadge status={effectiveStatus} />
+            {effectiveStatus !== asset.status && (
+              <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                last seen {asset.last_seen_at ? formatTimeAgo(asset.last_seen_at) : "never"}
+              </span>
+            )}
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground mt-0.5">
             {asset.os} {asset.os_version} • Agent v{asset.agent_version} •{" "}
             <code className="text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">{asset.agent_id}</code>
           </p>
@@ -166,10 +193,31 @@ const AssetDetailPage = () => {
             </p>
           )}
         </div>
+        {isAdmin && (
+          <div className="flex-shrink-0">
+            <DeleteAssetDialog
+              hostname={asset.hostname}
+              onConfirm={handleDelete}
+              trigger={
+                <button
+                  disabled={deleting}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 hover:border-red-500/30 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Bug className="h-3.5 w-3.5" />
+                  )}
+                  Delete Asset
+                </button>
+              }
+            />
+          </div>
+        )}
       </div>
 
       {/* Row 1: Hardware */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Cpu className="h-4 w-4" /><span className="text-xs">CPU</span>
@@ -200,8 +248,8 @@ const AssetDetailPage = () => {
         </Card>
       </div>
 
-      {/* Row 2: Disk, Temp, WiFi, Link Speed */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Row 2: Disk, Temp, WiFi, Speed */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Disc className="h-4 w-4" /><span className="text-xs">Disk</span>
@@ -228,9 +276,7 @@ const AssetDetailPage = () => {
           </div>
           <p className="text-sm font-semibold truncate">{asset.wifi_ssid || "N/A"}</p>
           <p className={`text-xs ${signalInfo.color}`}>
-            {hasSignal
-              ? `${asset.wifi_signal_dbm} dBm (${signalInfo.text})`
-              : signalInfo.text}
+            {hasSignal ? `${asset.wifi_signal_dbm} dBm (${signalInfo.text})` : signalInfo.text}
           </p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
@@ -243,8 +289,8 @@ const AssetDetailPage = () => {
         </Card>
       </div>
 
-      {/* Row 3: WiFi IP, Gateway, Ping Latency, Error Count */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Row 3: Network Info */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Wifi className="h-4 w-4" /><span className="text-xs">WiFi IP</span>
@@ -270,7 +316,7 @@ const AssetDetailPage = () => {
           onClick={() => errorHistory.length > 0 && setShowErrorDetail(true)}
         >
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Bug className="h-4 w-4" /><span className="text-xs">System Errors (1h)</span>
+            <Bug className="h-4 w-4" /><span className="text-xs">Errors (1h)</span>
           </div>
           <p className={`text-sm font-semibold ${Number(asset.error_count) > 0 ? "text-red-400" : "text-emerald-400"}`}>
             {asset.error_count ?? 0}
@@ -281,57 +327,58 @@ const AssetDetailPage = () => {
         </Card>
       </div>
 
-      {/* Time Range Selector */}
-      <div className="flex items-center gap-1.5">
-        {timeRangeOptions.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setTimeRange(opt.value)}
-            className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-              timeRange === opt.value
-                ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
-                : "border border-white/[0.06] text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      {/* Time Range + Charts */}
+      <div className="space-y-5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {timeRangeOptions.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setTimeRange(opt.value)}
+              className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                timeRange === opt.value
+                  ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
+                  : "border border-white/[0.06] text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
-      {/* Charts */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <h3 className="mb-3 text-sm font-semibold">CPU Usage</h3>
-          {metrics.length > 0 ? (
-            <MetricsChart data={metrics} metric="cpu_percent" color="#60a5fa" height={200} />
-          ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
-          )}
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <h3 className="mb-3 text-sm font-semibold">RAM Usage</h3>
-          {metrics.length > 0 ? (
-            <MetricsChart data={metrics} metric="ram_percent" color="#a78bfa" height={200} />
-          ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
-          )}
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <h3 className="mb-3 text-sm font-semibold">Storage Usage</h3>
-          {metrics.length > 0 ? (
-            <MetricsChart data={metrics} metric="storage_percent" color="#fbbf24" height={200} />
-          ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
-          )}
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <h3 className="mb-3 text-sm font-semibold">Ping Latency (8.8.8.8)</h3>
-          {metrics.length > 0 ? (
-            <MetricsChart data={metrics} metric="ping_latency_ms" color="#34d399" height={200} />
-          ) : (
-            <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
-          )}
-        </Card>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+            <h3 className="mb-3 text-sm font-semibold">CPU Usage</h3>
+            {metrics.length > 0 ? (
+              <MetricsChart data={metrics} metric="cpu_percent" color="#60a5fa" height={200} />
+            ) : (
+              <EmptyChartPlaceholder />
+            )}
+          </Card>
+          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+            <h3 className="mb-3 text-sm font-semibold">RAM Usage</h3>
+            {metrics.length > 0 ? (
+              <MetricsChart data={metrics} metric="ram_percent" color="#a78bfa" height={200} />
+            ) : (
+              <EmptyChartPlaceholder />
+            )}
+          </Card>
+          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+            <h3 className="mb-3 text-sm font-semibold">Storage Usage</h3>
+            {metrics.length > 0 ? (
+              <MetricsChart data={metrics} metric="storage_percent" color="#fbbf24" height={200} />
+            ) : (
+              <EmptyChartPlaceholder />
+            )}
+          </Card>
+          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+            <h3 className="mb-3 text-sm font-semibold">Ping Latency (8.8.8.8)</h3>
+            {metrics.length > 0 ? (
+              <MetricsChart data={metrics} metric="ping_latency_ms" color="#34d399" height={200} />
+            ) : (
+              <EmptyChartPlaceholder />
+            )}
+          </Card>
+        </div>
       </div>
 
       {/* Location */}
@@ -347,9 +394,9 @@ const AssetDetailPage = () => {
         </div>
         {typeof window !== "undefined" && asset.last_location_lat != null && asset.last_location_lng != null ? (
           <MapView
-            assets={[asset]}
+            assets={[mapAsset]}
             center={[asset.last_location_lat, asset.last_location_lng]}
-            zoom={12}
+            zoom={13}
             className="h-[320px] rounded-none border-0"
           />
         ) : (
@@ -407,5 +454,22 @@ const AssetDetailPage = () => {
     </div>
   );
 };
+
+function EmptyChartPlaceholder() {
+  return (
+    <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
+  );
+}
+
+function formatTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default AssetDetailPage;

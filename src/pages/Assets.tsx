@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
+import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getAssets, setApiToken } from "@/lib/api";
+import { getAssets, deleteAsset, setApiToken } from "@/lib/api";
+import { computeEffectiveStatus } from "@/lib/status";
+import { showSuccess, showError } from "@/utils/toast";
 import type { ExtendedAsset, AgentStatus } from "@/lib/types";
 
 const statusFilterOptions: { label: string; value: AgentStatus | "all" }[] = [
@@ -34,19 +37,15 @@ function formatLastSeen(iso: string | null): string {
   return `${days}d ago`;
 }
 
-function formatWifiSignal(dbm: number | null): string {
-  if (dbm === null || dbm === 0 || dbm === -999) return "";
-  return `${dbm} dBm`;
-}
-
 const AssetsPage = () => {
-  const { token } = useAuth();
+  const { token, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [assets, setAssets] = useState<ExtendedAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<AgentStatus | "all">("all");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -57,9 +56,23 @@ const AssetsPage = () => {
       .finally(() => setLoading(false));
   }, [token]);
 
+  const handleDelete = useCallback(async (asset: ExtendedAsset) => {
+    setDeletingId(asset.id);
+    try {
+      await deleteAsset(asset.id);
+      showSuccess(`${asset.hostname} deleted`);
+      setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Failed to delete");
+    } finally {
+      setDeletingId(null);
+    }
+  }, []);
+
   const filtered = useMemo(() => {
     return assets.filter((a) => {
-      if (statusFilter !== "all" && a.status !== statusFilter) return false;
+      const effectiveStatus = computeEffectiveStatus(a);
+      if (statusFilter !== "all" && effectiveStatus !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -120,7 +133,7 @@ const AssetsPage = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search hostname, OS, WiFi, disk..."
-            className="w-56 rounded-lg border border-input bg-background py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            className="w-full sm:w-56 rounded-lg border border-input bg-background py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           />
         </div>
       </div>
@@ -143,54 +156,66 @@ const AssetsPage = () => {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.map((asset) => {
-          const signalStr = formatWifiSignal(asset.wifi_signal_dbm);
+          const effectiveStatus = computeEffectiveStatus(asset);
           return (
             <Card
               key={asset.id}
-              onClick={() => navigate(`/assets/${asset.id}`)}
-              className="cursor-pointer border-border bg-card p-4 shadow-sm transition-all hover:bg-muted/50 hover:border-foreground/10 hover:shadow-md"
+              className="group relative border-border bg-card p-4 shadow-sm transition-all hover:bg-muted/50 hover:border-foreground/10 hover:shadow-md"
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
-                  <p className="text-xs text-muted-foreground">{asset.os} {asset.os_version}</p>
+              <div
+                className="cursor-pointer"
+                onClick={() => navigate(`/assets/${asset.id}`)}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
+                    <p className="text-xs text-muted-foreground">{asset.os} {asset.os_version}</p>
+                  </div>
+                  <AgentStatusBadge status={effectiveStatus} showLabel={false} />
                 </div>
-                <AgentStatusBadge status={asset.status} showLabel={false} />
+                <div className="space-y-1.5 text-xs text-muted-foreground">
+                  <div className="flex justify-between">
+                    <span>CPU</span>
+                    <span className="text-foreground">{asset.cpu_model.split(" ").slice(-1)[0]}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>RAM</span>
+                    <span className="text-foreground">{formatBytes(asset.ram_total_bytes)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Disk</span>
+                    <span className="text-foreground">
+                      {asset.disk_type}{" "}
+                      {asset.disk_health_status && asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>WiFi</span>
+                    <span className="text-foreground truncate ml-2 max-w-[100px]" title={asset.wifi_ssid}>
+                      {asset.wifi_ssid || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>IP</span>
+                    <span className="text-foreground font-mono text-[10px]">
+                      {asset.ip_addresses?.[0] || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Last seen</span>
+                    <span className="text-foreground">{formatLastSeen(asset.last_seen_at)}</span>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5 text-xs text-muted-foreground">
-                <div className="flex justify-between">
-                  <span>CPU</span>
-                  <span className="text-foreground">{asset.cpu_model.split(" ").slice(-1)[0]}</span>
+              {/* Delete button - admin only, show on hover */}
+              {isAdmin && (
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <DeleteAssetDialog
+                    hostname={asset.hostname}
+                    onConfirm={() => handleDelete(asset)}
+                  />
                 </div>
-                <div className="flex justify-between">
-                  <span>RAM</span>
-                  <span className="text-foreground">{formatBytes(asset.ram_total_bytes)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Disk</span>
-                  <span className="text-foreground">
-                    {asset.disk_type}{" "}
-                    {asset.disk_health_status && asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>WiFi</span>
-                  <span className="text-foreground truncate ml-2 max-w-[100px]" title={asset.wifi_ssid}>
-                    {asset.wifi_ssid || "N/A"}
-                    {signalStr && ` (${signalStr})`}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>IP</span>
-                  <span className="text-foreground font-mono text-[10px]">
-                    {asset.ip_addresses?.[0] || "N/A"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Last seen</span>
-                  <span className="text-foreground">{formatLastSeen(asset.last_seen_at)}</span>
-                </div>
-              </div>
+              )}
             </Card>
           );
         })}

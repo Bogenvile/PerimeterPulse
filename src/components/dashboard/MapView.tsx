@@ -10,44 +10,61 @@ interface MappableAsset {
   status: AgentStatus;
   last_location_lat: number | null;
   last_location_lng: number | null;
+  last_seen_at?: string | null;
+  wifi_ssid?: string;
+  city?: string;
+  country?: string;
 }
-
-// Inline SVG marker icon sebagai data URI — tidak perlu import file gambar
-const defaultIconSvg = encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
-    <path fill="#3b82f6" stroke="#fff" stroke-width="2" d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
-    <circle cx="12.5" cy="12.5" r="5" fill="#fff"/>
-  </svg>`
-);
-
-const defaultIcon = L.icon({
-  iconUrl: `data:image/svg+xml,${defaultIconSvg}`,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowUrl: "",
-});
 
 const statusColors: Record<string, string> = {
   online: "#10b981",
-  offline: "#ef4444",
+  offline: "#6b7280",
   warning: "#f59e0b",
-  critical: "#f97316",
+  critical: "#ef4444",
 };
 
-function createMarkerIcon(status: string) {
+function createMarkerIcon(status: string): L.DivIcon {
   const color = statusColors[status] || "#6b7280";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
-    <path fill="${color}" stroke="#fff" stroke-width="2" d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
-    <circle cx="12.5" cy="12.5" r="5" fill="#fff"/>
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="0 0 28 44">
+    <defs>
+      <filter id="shadow" x="-20%" y="-10%" width="140%" height="130%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="${color}" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+    <path fill="${color}" stroke="#fff" stroke-width="2" d="M14 0C6.3 0 0 6.3 0 14C0 24.5 14 44 14 44S28 24.5 28 14C28 6.3 21.7 0 14 0z" filter="url(#shadow)"/>
+    <circle cx="14" cy="14" r="5.5" fill="#fff" opacity="0.95"/>
   </svg>`;
-  return L.icon({
-    iconUrl: `data:image/svg+xml,${encodeURIComponent(svg)}`,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowUrl: "",
+  return L.divIcon({
+    html: `<img src="data:image/svg+xml,${encodeURIComponent(svg)}" style="width:28px;height:44px;" />`,
+    iconSize: [28, 44],
+    iconAnchor: [14, 44],
+    popupAnchor: [0, -40],
+    className: "",
   });
+}
+
+function createPulseIcon(status: string): L.DivIcon {
+  const color = statusColors[status] || "#6b7280";
+  return L.divIcon({
+    html: `<div style="position:relative;width:28px;height:44px;">
+      <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:12px;height:12px;border-radius:50%;background:${color};opacity:0.3;animation:pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite;"/>
+    </div>`,
+    iconSize: [28, 44],
+    iconAnchor: [14, 44],
+    className: "",
+  });
+}
+
+function formatLastSeen(iso: string | null | undefined): string {
+  if (!iso) return "Never";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 interface MapViewProps {
@@ -61,13 +78,13 @@ interface MapViewProps {
 export function MapView({
   assets,
   onAssetClick,
-  center = [40, -40],
+  center = [20, 0],
   zoom = 2,
   className = "",
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.Marker[]>([]);
+  const markersRef = useRef<L.LayerGroup>(L.layerGroup());
 
   const handleAssetClick = useCallback(
     (asset: MappableAsset) => {
@@ -76,26 +93,23 @@ export function MapView({
     [onAssetClick],
   );
 
-  // Initialize map
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    try {
-      const map = L.map(containerRef.current, {
-        center,
-        zoom,
-        zoomControl: true,
-        attributionControl: false,
-      });
+    const map = L.map(containerRef.current, {
+      center,
+      zoom,
+      zoomControl: true,
+      attributionControl: false,
+    });
 
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-      }).addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png", {
+      maxZoom: 19,
+      subdomains: "abcd",
+    }).addTo(map);
 
-      mapRef.current = map;
-    } catch (err) {
-      console.error("MapView init error:", err);
-    }
+    markersRef.current.addTo(map);
+    mapRef.current = map;
 
     return () => {
       try {
@@ -104,23 +118,16 @@ export function MapView({
           mapRef.current = null;
         }
       } catch {
-        // ignore cleanup errors
+        // ignore
       }
     };
   }, []);
 
-  // Update markers when assets change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Clear old markers safely
-    try {
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current = [];
-    } catch {
-      markersRef.current = [];
-    }
+    markersRef.current.clearLayers();
 
     const validAssets = assets.filter(
       (a) =>
@@ -133,43 +140,56 @@ export function MapView({
     if (validAssets.length === 0) return;
 
     validAssets.forEach((asset) => {
-      try {
-        const marker = L.marker(
-          [asset.last_location_lat!, asset.last_location_lng!],
-          { icon: createMarkerIcon(asset.status) },
-        )
-          .bindPopup(
-            `<div style="font-family:system-ui,sans-serif;font-size:13px;color:#e2e8f0">
-              <strong>${asset.hostname}</strong><br/>
-              <span style="font-size:11px;color:#94a3b8">${asset.os} — ${asset.status}</span>
-            </div>`,
-          )
-          .addTo(map);
+      const lat = asset.last_location_lat!;
+      const lng = asset.last_location_lng!;
+      const color = statusColors[asset.status] || "#6b7280";
+      const lastSeen = formatLastSeen(asset.last_seen_at);
+      const location = [asset.city, asset.country].filter(Boolean).join(", ");
 
-        marker.on("click", () => handleAssetClick(asset));
-        markersRef.current.push(marker);
-      } catch (err) {
-        console.warn("Failed to add marker for asset:", asset.id, err);
+      const marker = L.marker([lat, lng], {
+        icon: createMarkerIcon(asset.status),
+      });
+
+      if (asset.status === "online") {
+        L.marker([lat, lng], { icon: createPulseIcon(asset.status), interactive: false })
+          .addTo(markersRef.current);
       }
+
+      marker.bindPopup(
+        `<div style="font-family:system-ui,-apple-system,sans-serif;min-width:160px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;${asset.status === 'online' ? 'box-shadow:0 0 6px ' + color : ''}"></span>
+            <strong style="font-size:13px;color:hsl(210 40% 98%)">${asset.hostname}</strong>
+          </div>
+          <div style="font-size:11px;color:hsl(215 20% 65%);line-height:1.7">
+            ${asset.os}<br/>
+            ${asset.wifi_ssid || "No WiFi"} · <span style="color:${color}">${lastSeen}</span>
+            ${location ? `<br/>📍 ${location}` : ""}
+          </div>
+        </div>`,
+        { maxWidth: 260 },
+      );
+
+      marker.on("click", () => handleAssetClick(asset));
+      marker.addTo(markersRef.current);
     });
 
-    // Fit bounds
     try {
       const bounds = L.latLngBounds(
         validAssets.map((a) => [a.last_location_lat!, a.last_location_lng!] as [number, number]),
       );
       if (bounds.isValid()) {
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 13 });
       }
     } catch {
-      // ignore bounds errors
+      // ignore
     }
   }, [assets, handleAssetClick]);
 
   return (
     <div
       ref={containerRef}
-      className={`w-full rounded-xl border border-white/[0.06] ${className}`}
+      className={`w-full ${className}`}
       style={{ minHeight: 400 }}
     />
   );
