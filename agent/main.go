@@ -1,119 +1,97 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"flag"
+	"fmt"
 	"log"
-	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"perimeterpulse/agent/collector"
+	"perimeterpulse/agent/client"
+	"perimeterpulse/agent/buffer"
 )
 
-type HeartbeatPayload struct {
-	AgentID string                 `json:"agent_id"`
-	APIKey  string                 `json:"api_key"`
-	Metrics *collector.Metrics    `json:"metrics,omitempty"`
-	Network *collector.NetworkInfo `json:"network_info,omitempty"`
-	Location *collector.Location  `json:"location,omitempty"`
-}
-
-type RegisterPayload struct {
-	Hostname      string   `json:"hostname"`
-	OS            string   `json:"os"`
-	OSVersion     string   `json:"os_version"`
-	AgentVersion  string   `json:"agent_version"`
-	APIKey        string   `json:"api_key"`
-	MACAddresses  []string `json:"mac_addresses"`
-	IPAddresses   []string `json:"ip_addresses"`
-	CPUModel      string   `json:"cpu_model"`
-	CPUCores      int      `json:"cpu_cores"`
-	RAMTotalBytes int64    `json:"ram_total_bytes"`
-	StorageTotalBytes int64 `json:"storage_total_bytes"`
-	DiskModel     string   `json:"disk_model"`
-	DiskType      string   `json:"disk_type"`
-	WiFiSSID      string   `json:"wifi_ssid"`
-	WiFiSignalDBM int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int   `json:"network_speed_mbps"`
-}
-
 func main() {
-	serverURL := os.Getenv("SERVER_URL")
-	if serverURL == "" {
-		serverURL = "http://localhost:3000"
-	}
-	apiKey := os.Getenv("API_KEY")
+	server := flag.String("server", "", "Server URL (e.g. https://example.com)")
+	apikey := flag.String("apikey", "", "API key for authentication")
+	hostname := flag.String("hostname", "", "Override hostname (optional)")
+	flag.Parse()
+
+	// Priority: flag > env
+	apiKey := *apikey
 	if apiKey == "" {
-		log.Fatal("API_KEY environment variable required")
+		apiKey = os.Getenv("API_KEY")
 	}
+	if apiKey == "" {
+		log.Fatal("API_KEY environment variable or --apikey flag required")
+	}
+
+	serverURL := *server
+	if serverURL == "" {
+		serverURL = os.Getenv("SERVER_URL")
+	}
+	if serverURL == "" {
+		log.Fatal("SERVER_URL environment variable or --server flag required")
+	}
+
+	// Initialize client
+	c := client.New(serverURL, apiKey)
 
 	// Collect initial info
-	info := collector.CollectInfo()
+	info := collector.CollectInfo(apiKey)
 
-	// Register
-	registerPayload := RegisterPayload{
-		Hostname:     info.Hostname,
-		OS:           info.OS,
-		OSVersion:    info.OSVersion,
-		AgentVersion: info.AgentVersion,
-		APIKey:       apiKey,
-		MACAddresses: info.MACAddresses,
-		IPAddresses:  info.IPAddresses,
-		CPUModel:     info.CPUModel,
-		CPUCores:     info.CPUCores,
-		RAMTotalBytes: info.RAMTotalBytes,
-		StorageTotalBytes: info.StorageTotalBytes,
-		DiskModel:    info.DiskModel,
-		DiskType:     info.DiskType,
-		WiFiSSID:     info.WiFiSSID,
-		WiFiSignalDBM: info.WiFiSignalDBM,
-		NetworkSpeedMbps: info.NetworkSpeedMbps,
+	if *hostname != "" {
+		info.Hostname = *hostname
 	}
 
-	body, _ := json.Marshal(registerPayload)
-	resp, err := http.Post(serverURL+"/api/agent/register", "application/json", bytes.NewReader(body))
+	// Register on startup
+	log.Println("Registering agent...")
+	err := c.Register(info)
 	if err != nil {
-		log.Fatalf("Registration failed: %v", err)
+		log.Printf("Register failed (will retry): %v", err)
+	} else {
+		log.Println("Registered successfully")
 	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		log.Fatalf("Registration returned status %d", resp.StatusCode)
-	}
-	log.Println("Registration successful")
 
-	agentID := info.Hostname + "-" + info.OS
+	// Load offline buffer
+	buf := buffer.New("pulse-buffer.jsonl")
+	buf.Flush(c.SendHeartbeat)
 
-	// Heartbeat loop
+	log.Println("Agent started. Sending heartbeat every 60 seconds.")
+
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for {
-		metrics := collector.CollectMetrics()
-		network := collector.CollectNetworkInfo()
-		location := collector.CollectLocation()
+		select {
+		case <-ticker.C:
+			metrics := collector.CollectMetrics()
+			loc := collector.CollectLocation()
+			netInfo := collector.CollectNetwork()
 
-		payload := HeartbeatPayload{
-			AgentID:  agentID,
-			APIKey:   apiKey,
-			Metrics:  metrics,
-			Network:  network,
-			Location: location,
-		}
-
-		data, _ := json.Marshal(payload)
-		resp, err := http.Post(serverURL+"/api/agent/heartbeat", "application/json", bytes.NewReader(data))
-		if err != nil {
-			log.Printf("Heartbeat failed: %v", err)
-		} else {
-			resp.Body.Close()
-			if resp.StatusCode != 200 {
-				log.Printf("Heartbeat returned status %d", resp.StatusCode)
+			err := c.SendHeartbeat(metrics, loc, netInfo)
+			if err != nil {
+				log.Printf("Heartbeat failed: %v, buffering...", err)
+				buf.Save(metrics, loc, netInfo)
 			} else {
 				log.Println("Heartbeat sent")
 			}
-		}
 
-		<-ticker.C
+		case <-sigChan:
+			log.Println("Shutting down...")
+			// Send final heartbeat
+			metrics := collector.CollectMetrics()
+			loc := collector.CollectLocation()
+			netInfo := collector.CollectNetwork()
+			_ = c.SendHeartbeat(metrics, loc, netInfo)
+			return
+		}
 	}
 }

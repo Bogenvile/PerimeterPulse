@@ -5,84 +5,133 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
+
+	"perimeterpulse/agent/collector"
 )
 
-type RegistrationRequest struct {
-	Hostname         string   `json:"hostname"`
-	OS               string   `json:"os"`
-	OSVersion        string   `json:"os_version"`
-	AgentVersion     string   `json:"agent_version"`
-	APIKey           string   `json:"api_key"`
-	MACAddresses     []string `json:"mac_addresses"`
-	IPAddresses      []string `json:"ip_addresses"`
-	CPUModel         string   `json:"cpu_model"`
-	CPUCores         int      `json:"cpu_cores"`
-	RAMTotalBytes    int64    `json:"ram_total_bytes"`
-	StorageTotalBytes int64   `json:"storage_total_bytes"`
-	DiskModel        string   `json:"disk_model"`
-	DiskType         string   `json:"disk_type"`
-	WiFiSSID         string   `json:"wifi_ssid"`
-	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int      `json:"network_speed_mbps"`
+type Client struct {
+	serverURL string
+	apiKey    string
+	agentID   string
+	http      *http.Client
 }
 
-type MetricsData struct {
-	CPUPercent       float64 `json:"cpu_percent"`
-	RAMPercent       float64 `json:"ram_percent"`
-	RAMUsedBytes     int64   `json:"ram_used_bytes"`
-	RAMTotalBytes    int64   `json:"ram_total_bytes"`
-	StoragePercent   float64 `json:"storage_percent"`
-	StorageUsedBytes int64   `json:"storage_used_bytes"`
-	StorageTotalBytes int64  `json:"storage_total_bytes"`
-	UptimeSeconds    int64   `json:"uptime_seconds"`
-	NetworkStatus    string  `json:"network_status"`
-	NetworkLatencyMs float64 `json:"network_latency_ms"`
-	Timestamp        string  `json:"timestamp"`
-}
-
-type LocationData struct {
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AccuracyMeters float64 `json:"accuracy_meters"`
-	Source         string  `json:"source"`
-	Timestamp      string  `json:"timestamp"`
-}
-
-type NetworkInfoData struct {
-	WiFiSSID        string   `json:"wifi_ssid"`
-	WiFiSignalDBM   int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int     `json:"network_speed_mbps"`
-	IPAddresses     []string `json:"ip_addresses"`
-}
-
-type HeartbeatRequest struct {
-	AgentID     string           `json:"agent_id"`
-	APIKey      string           `json:"api_key"`
-	Metrics     *MetricsData     `json:"metrics,omitempty"`
-	Location    *LocationData    `json:"location,omitempty"`
-	NetworkInfo *NetworkInfoData `json:"network_info,omitempty"`
-}
-
-func Register(server string, req *RegistrationRequest) error {
-	return postJSON(server+"/api/agent/register", req)
-}
-
-func SendHeartbeat(server string, req *HeartbeatRequest) error {
-	return postJSON(server+"/api/agent/heartbeat", req)
-}
-
-func postJSON(url string, body interface{}) error {
-	data, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal error: %w", err)
+func New(serverURL, apiKey string) *Client {
+	return &Client{
+		serverURL: serverURL,
+		apiKey:    apiKey,
+		http: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+}
+
+func (c *Client) Register(info *collector.Info) error {
+	payload := map[string]interface{}{
+		"hostname":          info.Hostname,
+		"os":                info.OS,
+		"os_version":        info.OSVersion,
+		"agent_version":     info.AgentVersion,
+		"api_key":           info.APIKey,
+		"mac_addresses":     info.MACAddresses,
+		"ip_addresses":      info.IPAddresses,
+		"cpu_model":         info.CPUModel,
+		"cpu_cores":         info.CPUCores,
+		"ram_total_bytes":   info.RAMTotalBytes,
+		"storage_total_bytes": info.StorageTotalBytes,
+		"disk_model":        info.DiskModel,
+		"disk_type":         info.DiskType,
+		"wifi_ssid":         info.WiFiSSID,
+		"wifi_signal_dbm":   info.WiFiSignalDBM,
+		"network_speed_mbps": info.NetworkSpeedMbps,
+	}
+
+	body, _ := json.Marshal(payload)
+	resp, err := c.http.Post(c.serverURL+"/api/agent/register", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("http error: %w", err)
+		return fmt.Errorf("register request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("server returned %d", resp.StatusCode)
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("register failed with status %d", resp.StatusCode)
 	}
+
+	var result struct {
+		Ok      bool   `json:"ok"`
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("register decode failed: %w", err)
+	}
+
+	if !result.Ok {
+		return fmt.Errorf("register returned not ok")
+	}
+
+	c.agentID = result.AgentID
+	return nil
+}
+
+func (c *Client) SendHeartbeat(metrics *collector.Metrics, loc *collector.Location, netInfo *collector.NetworkInfo) error {
+	if c.agentID == "" {
+		return fmt.Errorf("agent not registered")
+	}
+
+	payload := map[string]interface{}{
+		"agent_id": c.agentID,
+		"api_key":  c.apiKey,
+		"metrics": map[string]interface{}{
+			"cpu_percent":        metrics.CPUPercent,
+			"ram_percent":        metrics.RAMPercent,
+			"ram_used_bytes":     metrics.MemoryUsed,
+			"ram_total_bytes":    metrics.MemoryTotal,
+			"storage_percent":    metrics.StoragePercent,
+			"storage_used_bytes": metrics.DiskUsed,
+			"storage_total_bytes": metrics.DiskTotal,
+			"uptime_seconds":     metrics.UptimeSeconds,
+			"network_status":     metrics.NetworkStatus,
+			"network_latency_ms": metrics.NetworkLatencyMs,
+			"gateway_reachable":  metrics.GatewayReachable,
+			"dns_working":        metrics.DNSWorking,
+			"internet_reachable": metrics.InternetReachable,
+			"default_gateway":    metrics.DefaultGateway,
+			"disk_health_status": metrics.DiskHealthStatus,
+			"disk_temperature_c": metrics.DiskTemperatureC,
+			"timestamp":          time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	if loc != nil {
+		payload["location"] = map[string]interface{}{
+			"latitude":       loc.Latitude,
+			"longitude":      loc.Longitude,
+			"accuracy_meters": loc.AccuracyMeters,
+			"source":         loc.Source,
+			"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	if netInfo != nil {
+		payload["network_info"] = map[string]interface{}{
+			"wifi_ssid":        netInfo.WiFiSSID,
+			"wifi_signal_dbm":  netInfo.WiFiSignalDBM,
+			"network_speed_mbps": netInfo.NetworkSpeedMbps,
+			"ip_addresses":     netInfo.IPAddresses,
+		}
+	}
+
+	body, _ := json.Marshal(payload)
+	resp, err := c.http.Post(c.serverURL+"/api/agent/heartbeat", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("heartbeat request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("heartbeat failed with status %d", resp.StatusCode)
+	}
+
 	return nil
 }

@@ -45,6 +45,7 @@ type Info struct {
 	OSVersion         string
 	AgentVersion      string
 	AgentID           string
+	APIKey            string   // <-- ditambahkan
 	MACAddresses      []string
 	IPAddresses       []string
 	CPUModel          string
@@ -58,7 +59,7 @@ type Info struct {
 	NetworkSpeedMbps  int
 }
 
-func CollectInfo() *Info {
+func CollectInfo(apiKey string) *Info {
 	hostname, _ := os.Hostname()
 	return &Info{
 		Hostname:          hostname,
@@ -66,6 +67,7 @@ func CollectInfo() *Info {
 		OSVersion:         runtime.GOARCH,
 		AgentVersion:      "1.0.0",
 		AgentID:           hostname + "-" + runtime.GOOS,
+		APIKey:            apiKey,
 		MACAddresses:      []string{},
 		IPAddresses:       []string{},
 		CPUModel:          "Unknown",
