@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,111 +15,134 @@ import (
 )
 
 func main() {
-	serverURL := flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
-	apiKey := flag.String("apikey", "", "API key for the server")
-	hostname := flag.String("hostname", "", "Override hostname (default: OS hostname)")
+	// Parse command-line flags
+	serverURL := flag.String("server", "http://localhost:3000", "Server URL")
+	apiKey := flag.String("apikey", "", "API Key")
+	hostname := flag.String("hostname", "", "Custom hostname (optional)")
+	bufferPath := flag.String("buffer", "./agent-buffer.jsonl", "Path to offline buffer file")
+	interval := flag.Duration("interval", 60*time.Second, "Heartbeat interval")
 	flag.Parse()
 
 	if *apiKey == "" {
 		log.Fatal("--apikey is required")
 	}
-	if *serverURL == "" {
-		log.Fatal("--server is required")
+
+	// Initialize HTTP client
+	httpClient := client.NewClient(*serverURL, *apiKey)
+
+	// Initialize offline buffer
+	buf := buffer.NewBuffer(*bufferPath)
+
+	// Collect initial system info (registration)
+	sysInfo := collector.CollectSystemInfo()
+
+	// Use custom hostname if provided, otherwise use system hostname
+	if *hostname != "" {
+		sysInfo.Hostname = *hostname
 	}
 
-	apiClient := client.NewClient(*serverURL, *apiKey)
-	buf := buffer.NewBuffer(apiClient)
+	// Register with server
+	registerPayload := client.RegisterPayload{
+		Hostname:       sysInfo.Hostname,
+		OS:             sysInfo.OS,
+		OSVersion:      sysInfo.OSVersion,
+		AgentVersion:   "1.0.0",
+		APIKey:         *apiKey,
+		MacAddresses:   sysInfo.MacAddresses,
+		CPUModel:       sysInfo.CPUModel,
+		CPUCores:       sysInfo.CPUCores,
+		RAMTotalBytes:  sysInfo.RAMTotal,
+		StorageTotalBytes: sysInfo.StorageTotal,
+	}
 
-	// Determine hostname
-	host := *hostname
-	if host == "" {
-		var err error
-		host, err = os.Hostname()
-		if err != nil {
-			log.Fatalf("unable to get hostname: %v", err)
+	log.Printf("Registering agent: %s", sysInfo.Hostname)
+	agentID, err := httpClient.Register(registerPayload)
+	if err != nil {
+		log.Printf("Registration failed: %v (will continue with retries)", err)
+	} else {
+		log.Printf("Registered as agent: %s", agentID)
+	}
+
+	// Replay buffered heartbeats if any
+	if buf.HasPending() {
+		log.Println("Replaying buffered heartbeats...")
+		payloads := buf.Flush()
+		for _, payload := range payloads {
+			if err := httpClient.SendRaw(payload); err != nil {
+				log.Printf("Failed to replay buffered heartbeat: %v", err)
+				buf.Append(payload)
+			}
 		}
 	}
 
-	// Register the agent
-	sysInfo := collector.CollectSystemInfo(host)
-	agentID, err := apiClient.Register(sysInfo)
-	if err != nil {
-		log.Printf("WARNING: registration failed: %v", err)
-		log.Println("Continuing without registration — heartbeat will retry later")
-		agentID = "unknown"
-	}
-	log.Printf("Agent ID: %s", agentID)
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start flushing buffered data
-	buf.Start(agentID)
-
-	// Graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	ticker := time.NewTicker(60 * time.Second)
+	// Main heartbeat loop
+	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
-
-	log.Println("Agent started, sending heartbeat every 60s")
-	log.Println("Press Ctrl+C to stop")
-
-	// Immediate first heartbeat
-	collectAndSend(agentID, apiClient)
 
 	for {
 		select {
-		case <-ticker.C:
-			collectAndSend(agentID, apiClient)
-		case sig := <-sigCh:
-			log.Printf("Received signal %v, shutting down", sig)
-			buf.Stop()
+		case <-sigChan:
+			log.Println("Shutting down...")
 			return
+		case <-ticker.C:
+			sendHeartbeat(httpClient, buf, sysInfo)
 		}
 	}
 }
 
-func collectAndSend(agentID string, apiClient *client.Client) {
-	// Collect metrics (always succeeds)
+func sendHeartbeat(httpClient *client.Client, buf *buffer.Buffer, sysInfo collector.SystemInfo) {
+	// Collect current metrics
 	metrics := collector.CollectMetrics()
-
-	// Network diagnostics
-	collector.RunNetworkDiag(&metrics)
-
-	// Collect location (best-effort)
-	loc, locErr := collector.CollectLocation()
-	if locErr != nil {
-		log.Printf("WARNING: location collection failed: %v", locErr)
-	}
-
-	// Collect network info (always succeeds)
 	netInfo := collector.CollectNetworkInfo()
+	loc := collector.CollectLocation()
 
-	// Collect disk health (best-effort)
-	diskHealth := collector.CollectDiskHealth()
+	now := time.Now().UTC()
 
 	// Build heartbeat payload
-	payload := client.HeartbeatPayload{
-		AgentID:     agentID,
-		Metrics:     &metrics,
-		NetworkInfo: &netInfo,
+	heartbeat := client.HeartbeatPayload{
+		AgentID: "", // Will be set by agent registration or read from config
+		APIKey:  httpClient.APIKey,
+		Metrics: &client.HeartbeatMetrics{
+			CPUPercent:       metrics.CPUPercent,
+			RAMPercent:       metrics.RAMPercent,
+			RAMUsedBytes:     metrics.RAMUsed,
+			RAMTotalBytes:    metrics.RAMTotal,
+			StoragePercent:   metrics.StoragePercent,
+			StorageUsedBytes: metrics.StorageUsed,
+			StorageTotalBytes: metrics.StorageTotal,
+			UptimeSeconds:    metrics.UptimeSeconds,
+			NetworkStatus:    metrics.NetworkStatus,
+			NetworkLatencyMs: metrics.NetworkLatencyMs,
+			DiskHealthStatus: metrics.DiskHealthStatus,
+			DiskTemperatureC: metrics.DiskTemperatureC,
+			Timestamp:        now.Format(time.RFC3339),
+		},
+		NetworkInfo: &client.HeartbeatNetworkInfo{
+			WifiSSID:        netInfo.WifiSSID,
+			WifiSignalDBM:   netInfo.WifiSignalDBM,
+			NetworkSpeedMbps: netInfo.NetworkSpeedMbps,
+			IPAddresses:     netInfo.IPAddresses,
+		},
+		Location: &client.HeartbeatLocation{
+			Latitude:     loc.Latitude,
+			Longitude:    loc.Longitude,
+			AccuracyM:    loc.AccuracyMeters,
+			Source:       loc.Source,
+			Timestamp:    now.Format(time.RFC3339),
+		},
 	}
 
-	if locErr == nil {
-		payload.Location = &client.LocationData{
-			Latitude:       loc.Latitude,
-			Longitude:      loc.Longitude,
-			AccuracyMeters: loc.AccuracyMeters,
-			Source:         loc.Source,
-		}
-	}
-
-	if diskHealth != nil {
-		payload.Metrics.DiskHealthStatus = &diskHealth.Status
-		payload.Metrics.DiskTemperatureC = diskHealth.TemperatureCelsius
-	}
-
-	if err := apiClient.SendHeartbeat(payload); err != nil {
-		log.Printf("ERROR: heartbeat failed: %v", err)
-		_ = buffer.NewBuffer(apiClient) // won't re-save here; buffer already active
+	// Send heartbeat
+	err := httpClient.Heartbeat(heartbeat)
+	if err != nil {
+		log.Printf("Heartbeat failed: %v (buffering for later)", err)
+		// Buffer the heartbeat for retry
+		buf.Append(heartbeat)
+	} else {
+		log.Printf("Heartbeat sent successfully for %s", sysInfo.Hostname)
 	}
 }
