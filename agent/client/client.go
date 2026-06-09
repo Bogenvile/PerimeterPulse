@@ -4,133 +4,105 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"time"
 
-	"perimeterpulse/agent/collector"
+	"agent/collector"
 )
 
 type Client struct {
 	serverURL string
 	apiKey    string
+	hostname  string
 	agentID   string
 	http      *http.Client
 }
 
-func New(serverURL, apiKey string) *Client {
+func New(serverURL, apiKey, hostname string) *Client {
 	return &Client{
 		serverURL: serverURL,
 		apiKey:    apiKey,
+		hostname:  hostname,
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 15 * time.Second,
 		},
 	}
 }
 
-func (c *Client) Register(info *collector.Info) error {
-	payload := map[string]interface{}{
-		"hostname":          info.Hostname,
-		"os":                info.OS,
-		"os_version":        info.OSVersion,
-		"agent_version":     info.AgentVersion,
-		"api_key":           info.APIKey,
-		"mac_addresses":     info.MACAddresses,
-		"ip_addresses":      info.IPAddresses,
-		"cpu_model":         info.CPUModel,
-		"cpu_cores":         info.CPUCores,
-		"ram_total_bytes":   info.RAMTotalBytes,
-		"storage_total_bytes": info.StorageTotalBytes,
-		"disk_model":        info.DiskModel,
-		"disk_type":         info.DiskType,
-		"wifi_ssid":         info.WiFiSSID,
-		"wifi_signal_dbm":   info.WiFiSignalDBM,
-		"network_speed_mbps": info.NetworkSpeedMbps,
+func (c *Client) Register() error {
+	payload := collector.RegistrationPayload{
+		Hostname:   c.hostname,
+		Os:         collector.GetOS(),
+		OsVersion:  collector.GetOSVersion(),
+		AgentVersion: "1.0.0",
+		MACAddresses: collector.GetMACAddresses(),
+		IPAddresses:  collector.GetIPAddresses(),
+		CPUModel:     collector.GetCPUModel(),
+		CPUCores:     collector.GetCPUCores(),
+		RAMTotalBytes: collector.GetRAMTotal(),
+		StorageTotalBytes: collector.GetStorageTotal(),
+		DiskModel:    collector.GetDiskModel(),
+		DiskType:     collector.GetDiskType(),
+		WiFiSSID:     collector.GetWiFiSSID(),
+		WiFiSignalDBM: collector.GetWiFiSignalDBM(),
+		NetworkSpeedMbps: collector.GetNetworkSpeed(),
+		APIKey:       c.apiKey,
 	}
 
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal register payload: %w", err)
+	}
+
 	resp, err := c.http.Post(c.serverURL+"/api/agent/register", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("register request failed: %w", err)
+		return fmt.Errorf("register request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("register failed with status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("register failed (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
-		Ok      bool   `json:"ok"`
+		OK      bool   `json:"ok"`
 		AgentID string `json:"agent_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("register decode failed: %w", err)
-	}
-
-	if !result.Ok {
-		return fmt.Errorf("register returned not ok")
+		return fmt.Errorf("decode register response: %w", err)
 	}
 
 	c.agentID = result.AgentID
+	log.Printf("Registered with agent_id: %s", c.agentID)
 	return nil
 }
 
-func (c *Client) SendHeartbeat(metrics *collector.Metrics, loc *collector.Location, netInfo *collector.NetworkInfo) error {
-	if c.agentID == "" {
-		return fmt.Errorf("agent not registered")
+func (c *Client) Heartbeat(metrics *collector.Metrics, location *collector.Location, network *collector.NetworkInfo) error {
+	payload := collector.HeartbeatPayload{
+		AgentID: c.agentID,
+		APIKey:  c.apiKey,
+		Metrics: metrics,
+		Location: location,
+		NetworkInfo: network,
 	}
 
-	payload := map[string]interface{}{
-		"agent_id": c.agentID,
-		"api_key":  c.apiKey,
-		"metrics": map[string]interface{}{
-			"cpu_percent":        metrics.CPUPercent,
-			"ram_percent":        metrics.RAMPercent,
-			"ram_used_bytes":     metrics.MemoryUsed,
-			"ram_total_bytes":    metrics.MemoryTotal,
-			"storage_percent":    metrics.StoragePercent,
-			"storage_used_bytes": metrics.DiskUsed,
-			"storage_total_bytes": metrics.DiskTotal,
-			"uptime_seconds":     metrics.UptimeSeconds,
-			"network_status":     metrics.NetworkStatus,
-			"network_latency_ms": metrics.NetworkLatencyMs,
-			"gateway_reachable":  metrics.GatewayReachable,
-			"dns_working":        metrics.DNSWorking,
-			"internet_reachable": metrics.InternetReachable,
-			"default_gateway":    metrics.DefaultGateway,
-			"disk_health_status": metrics.DiskHealthStatus,
-			"disk_temperature_c": metrics.DiskTemperatureC,
-			"timestamp":          time.Now().UTC().Format(time.RFC3339),
-		},
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal heartbeat payload: %w", err)
 	}
 
-	if loc != nil {
-		payload["location"] = map[string]interface{}{
-			"latitude":       loc.Latitude,
-			"longitude":      loc.Longitude,
-			"accuracy_meters": loc.AccuracyMeters,
-			"source":         loc.Source,
-			"timestamp":      time.Now().UTC().Format(time.RFC3339),
-		}
-	}
-
-	if netInfo != nil {
-		payload["network_info"] = map[string]interface{}{
-			"wifi_ssid":        netInfo.WiFiSSID,
-			"wifi_signal_dbm":  netInfo.WiFiSignalDBM,
-			"network_speed_mbps": netInfo.NetworkSpeedMbps,
-			"ip_addresses":     netInfo.IPAddresses,
-		}
-	}
-
-	body, _ := json.Marshal(payload)
 	resp, err := c.http.Post(c.serverURL+"/api/agent/heartbeat", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("heartbeat request failed: %w", err)
+		return fmt.Errorf("heartbeat request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("heartbeat failed with status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("heartbeat failed (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
