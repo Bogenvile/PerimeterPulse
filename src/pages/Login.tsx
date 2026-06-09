@@ -102,10 +102,6 @@ const LoginPage = () => {
               {submitting ? "Signing in..." : "Sign In"}
             </button>
           </form>
-
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            Default: admin / admin123 or viewer / viewer123
-          </p>
         </Card>
       </div>
     </div>

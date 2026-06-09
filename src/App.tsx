@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import MapPage from "./pages/Map";
 import AssetsPage from "./pages/Assets";
 import AssetDetailPage from "./pages/AssetDetail";
+import AccountManagementPage from "./pages/AccountManagement";
 import LoginPage from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -55,6 +56,7 @@ const App = () => (
                 <Route path="/map" element={<MapPage />} />
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/assets/:id" element={<AssetDetailPage />} />
+                <Route path="/account" element={<AccountManagementPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

@@ -13,6 +13,7 @@ import {
   PanelLeftOpen,
   Menu,
   X,
+  UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -92,6 +93,7 @@ export function AppLayout() {
           </NavLink>
         ))}
 
+        {/* Admin Section */}
         {isAdmin && (
           <>
             <div className="my-2 border-t border-sidebar-border" />
@@ -109,6 +111,21 @@ export function AppLayout() {
             </button>
           </>
         )}
+
+        {/* Account Section - All users */}
+        <div className="my-2 border-t border-sidebar-border" />
+        <button
+          onClick={() => navigate("/account")}
+          title={collapsed ? "Account" : undefined}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+            collapsed && "justify-center px-0",
+            location.pathname === "/account" && "bg-blue-600/15 text-blue-400",
+          )}
+        >
+          <UserCog className="h-4 w-4 flex-shrink-0" />
+          <span className="sidebar-label">Account</span>
+        </button>
       </nav>
 
       {/* Collapse toggle - desktop only */}
@@ -132,15 +149,18 @@ export function AppLayout() {
       {/* User section */}
       {user && (
         <div className="border-t border-sidebar-border p-2 flex-shrink-0">
-          <div className={cn(
-            "flex items-center gap-2 mb-1 px-1",
-            collapsed && "justify-center"
-          )}>
+          <button
+            onClick={() => navigate("/account")}
+            className={cn(
+              "flex items-center gap-2 mb-1 px-1 w-full rounded-lg hover:bg-sidebar-accent transition-colors",
+              collapsed && "justify-center"
+            )}
+          >
             <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600/20">
               <User className="h-3.5 w-3.5 text-blue-400" />
             </div>
             {!collapsed && (
-              <div className="sidebar-label flex-1 min-w-0">
+              <div className="sidebar-label flex-1 min-w-0 text-left">
                 <p className="truncate text-xs font-medium text-sidebar-foreground">
                   {user.display_name || user.username}
                 </p>
@@ -150,7 +170,7 @@ export function AppLayout() {
                 </p>
               </div>
             )}
-          </div>
+          </button>
           <button
             onClick={handleLogout}
             title={collapsed ? "Sign Out" : undefined}
