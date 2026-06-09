@@ -12,41 +12,16 @@ type LocationData struct {
 }
 
 func CollectLocation() LocationData {
-	loc := LocationData{
-		Latitude:      0.0,
-		Longitude:     0.0,
-		AccuracyMeters: 0,
-		Source:        "geoip",
-	}
-
 	switch runtime.GOOS {
 	case "windows":
-		loc = collectWindowsLocation()
+		return collectWindowsLocation()
 	case "linux":
-		loc = collectLinuxLocation()
-	}
-
-	return loc
-}
-
-func collectWindowsLocation() LocationData {
-	// Windows location via WinRT API - stub for now
-	// In production use geolocator.dll or GeoCoordinateWatcher
-	return LocationData{
-		Latitude:      0.0,
-		Longitude:     0.0,
-		AccuracyMeters: 0,
-		Source:        "geoip",
-	}
-}
-
-func collectLinuxLocation() LocationData {
-	// Linux location via GeoClue2 D-Bus - stub for now
-	// In production use geoclue-2.0 D-Bus API
-	return LocationData{
-		Latitude:      0.0,
-		Longitude:     0.0,
-		AccuracyMeters: 0,
-		Source:        "geoip",
+		return collectLinuxLocation()
+	default:
+		return LocationData{
+			Latitude:  0.0,
+			Longitude: 0.0,
+			Source:    "unknown",
+		}
 	}
 }

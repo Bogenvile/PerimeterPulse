@@ -2,7 +2,6 @@ package collector
 
 import (
 	"log"
-	"os"
 )
 
 // collectWindowsLocation attempts to get Windows location via GeoIP fallback
@@ -28,6 +27,5 @@ func collectWindowsLocation() LocationData {
 
 func getGeoIP() (float64, float64, error) {
 	// Stub: in production, fetch from ip-api.com or similar
-	// Return default location
 	return 0.0, 0.0, nil
 }

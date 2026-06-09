@@ -7,7 +7,6 @@ import (
 // collectLinuxLocation attempts to get Linux location via GeoClue or GeoIP fallback
 func collectLinuxLocation() LocationData {
 	// Placeholder: try GeoClue D-Bus; fallback to GeoIP
-	// For now, just return GeoIP
 	lat, lng, err := getGeoIPLinux()
 	if err != nil {
 		log.Printf("Linux GeoIP lookup failed: %v", err)
