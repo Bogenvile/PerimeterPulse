@@ -6,7 +6,7 @@ import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, setApiToken } from "@/lib/api";
@@ -58,6 +58,7 @@ const AssetDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timeRange, setTimeRange] = useState("-1h");
+  const [showErrorDetail, setShowErrorDetail] = useState(false);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -119,6 +120,8 @@ const AssetDetailPage = () => {
 
   const signalInfo = wifiSignalLabel(asset.wifi_signal_dbm);
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
+
+  const errorHistory = metrics.filter((m) => Number(m.error_count) > 0);
 
   return (
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
@@ -244,13 +247,19 @@ const AssetDetailPage = () => {
             {fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}
           </p>
         </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
+        <Card
+          className="border-white/[0.06] bg-white/[0.02] p-4 cursor-pointer hover:bg-white/[0.04] transition-colors"
+          onClick={() => errorHistory.length > 0 && setShowErrorDetail(true)}
+        >
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Bug className="h-4 w-4" /><span className="text-xs">System Errors (1h)</span>
           </div>
           <p className={`text-sm font-semibold ${Number(asset.error_count) > 0 ? "text-red-400" : "text-emerald-400"}`}>
             {asset.error_count ?? 0}
           </p>
+          {errorHistory.length > 0 && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">Click for details →</p>
+          )}
         </Card>
       </div>
 
@@ -331,6 +340,38 @@ const AssetDetailPage = () => {
           </div>
         )}
       </Card>
+
+      {/* Error Detail Dialog */}
+      {showErrorDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg border border-white/[0.06] bg-card rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+              <div className="flex items-center gap-2">
+                <Bug className="h-4 w-4 text-red-400" />
+                <h3 className="text-sm font-semibold">Error History (last {timeRange.replace("-", "")})</h3>
+              </div>
+              <button
+                onClick={() => setShowErrorDetail(false)}
+                className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 max-h-72 overflow-y-auto space-y-2">
+              {errorHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No errors recorded in this period</p>
+              ) : (
+                errorHistory.map((m, idx) => (
+                  <div key={idx} className="flex items-center justify-between rounded-lg border border-white/[0.04] px-3 py-2 text-sm">
+                    <span className="text-muted-foreground text-xs">{new Date(m.time).toLocaleString()}</span>
+                    <span className="font-mono text-red-400">{Number(m.error_count)} error{Number(m.error_count) !== 1 ? 's' : ''}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
