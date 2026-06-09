@@ -48,13 +48,14 @@ func main() {
 	}
 	log.Printf("Registered as agent: %s", agentID)
 
-	state := struct {
-		AgentID string
-		APIKey  string
-	}{agentID, *apiKey}
+	// Simpan state
+	state := &agentState{
+		AgentID: agentID,
+		APIKey:  *apiKey,
+	}
 
 	// Kirim heartbeat pertama
-	sendHeartbeat(c, &state)
+	sendHeartbeat(c, state)
 
 	// Loop setiap 60 detik
 	ticker := time.NewTicker(60 * time.Second)
@@ -66,7 +67,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			sendHeartbeat(c, &state)
+			sendHeartbeat(c, state)
 		case <-sig:
 			log.Println("Shutting down...")
 			return
@@ -74,12 +75,13 @@ func main() {
 	}
 }
 
-func sendHeartbeat(c *client.Client, state *struct{ AgentID, APIKey string }) {
+type agentState struct {
+	AgentID string
+	APIKey  string
+}
+
+func sendHeartbeat(c *client.Client, state *agentState) {
 	metrics := collector.CollectMetrics()
-	if len(metrics.CPUPercent) == 0 && len(metrics.RAMPercent) == 0 {
-		log.Println("Metrics appear empty, skipping heartbeat")
-		return
-	}
 
 	hb := map[string]interface{}{
 		"agent_id": state.AgentID,
