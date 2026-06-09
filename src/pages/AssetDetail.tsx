@@ -12,6 +12,11 @@ import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, setApiToken } from "@/lib/api";
 import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint } from "@/lib/types";
 
+function fmt(n: unknown): number {
+  const v = Number(n);
+  return isNaN(v) ? 0 : v;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -156,14 +161,14 @@ const AssetDetailPage = () => {
             <HardDrive className="h-4 w-4" /><span className="text-xs">RAM</span>
           </div>
           <p className="text-sm font-semibold">{formatBytes(asset.ram_total_bytes)}</p>
-          {latest && <p className="text-xs text-muted-foreground">{latest.ram_percent.toFixed(1)}% used</p>}
+          {latest && <p className="text-xs text-muted-foreground">{fmt(latest.ram_percent).toFixed(1)}% used</p>}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Disc className="h-4 w-4" /><span className="text-xs">Storage</span>
           </div>
           <p className="text-sm font-semibold">{formatBytes(asset.storage_total_bytes)}</p>
-          {latest && <p className="text-xs text-muted-foreground">{latest.storage_percent.toFixed(1)}% used</p>}
+          {latest && <p className="text-xs text-muted-foreground">{fmt(latest.storage_percent).toFixed(1)}% used</p>}
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -236,15 +241,15 @@ const AssetDetailPage = () => {
             <Network className="h-4 w-4" /><span className="text-xs">Ping 8.8.8.8</span>
           </div>
           <p className="text-sm font-semibold">
-            {asset.ping_latency_ms != null ? `${asset.ping_latency_ms.toFixed(1)} ms` : "N/A"}
+            {fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}
           </p>
         </Card>
         <Card className="border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             <Bug className="h-4 w-4" /><span className="text-xs">System Errors (1h)</span>
           </div>
-          <p className={`text-sm font-semibold ${asset.error_count > 0 ? "text-red-400" : "text-emerald-400"}`}>
-            {asset.error_count}
+          <p className={`text-sm font-semibold ${Number(asset.error_count) > 0 ? "text-red-400" : "text-emerald-400"}`}>
+            {asset.error_count ?? 0}
           </p>
         </Card>
       </div>
