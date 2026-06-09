@@ -1,20 +1,19 @@
 package collector
 
 import (
-	"log"
 	"os"
 	"runtime"
 	"time"
 )
 
 type Metrics struct {
-	CPUPercent       float64
-	RAMPercent       float64
-	MemoryUsed       int64
-	MemoryTotal      int64
-	StoragePercent   float64
-	DiskUsed         int64
-	DiskTotal        int64
+	CPUPercent        float64
+	RAMPercent        float64
+	MemoryUsed        int64
+	MemoryTotal       int64
+	StoragePercent    float64
+	DiskUsed          int64
+	DiskTotal         int64
 	UptimeSeconds    int64
 	NetworkStatus    string
 	NetworkLatencyMs float64
@@ -82,7 +81,6 @@ func CollectInfo() *Info {
 }
 
 func CollectMetrics() *Metrics {
-	// Placeholder – in production, use platform-specific syscalls
 	m := &Metrics{
 		CPUPercent:       0,
 		RAMPercent:       0,
@@ -98,7 +96,6 @@ func CollectMetrics() *Metrics {
 		DiskTemperatureC: 35.0,
 	}
 
-	// Attempt default gateway
 	gw, err := GetDefaultGateway()
 	if err == nil {
 		m.DefaultGateway = gw
