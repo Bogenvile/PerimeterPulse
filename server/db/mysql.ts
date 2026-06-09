@@ -129,6 +129,7 @@ export async function queryMetrics(
   agentId: string,
   hours: number,
 ): Promise<Record<string, unknown>[]> {
+  const safeHours = Math.min(Math.max(parseInt(String(hours), 10) || 24, 1), 720);
   const rows = await query<Record<string, unknown>>(
     `SELECT
        recorded_at AS time,
@@ -136,9 +137,9 @@ export async function queryMetrics(
        network_status, network_latency_ms, ping_latency_ms, error_count,
        disk_health_status, disk_temperature_c
      FROM agent_metrics
-     WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+     WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ${safeHours} HOUR)
      ORDER BY recorded_at ASC`,
-    [agentId, hours],
+    [agentId],
   );
   return rows.map((r) => ({
     ...r,
@@ -173,14 +174,15 @@ export async function queryLocations(
   agentId: string,
   hours: number,
 ): Promise<Record<string, unknown>[]> {
+  const safeHours = Math.min(Math.max(parseInt(String(hours), 10) || 24, 1), 720);
   const rows = await query<Record<string, unknown>>(
     `SELECT
        recorded_at AS time,
        latitude, longitude, accuracy_meters, source
      FROM agent_locations
-     WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+     WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ${safeHours} HOUR)
      ORDER BY recorded_at ASC`,
-    [agentId, hours],
+    [agentId],
   );
   return rows.map((r) => ({
     ...r,
@@ -226,6 +228,7 @@ export async function queryErrorLogs(
   agentId: string,
   limit = 100,
 ): Promise<Record<string, unknown>[]> {
+  const safeLimit = Math.min(Math.max(parseInt(String(limit), 10) || 100, 1), 1000);
   const rows = await query<Record<string, unknown>>(
     `SELECT
        id, error_time AS time, error_id AS event_id,
@@ -234,11 +237,31 @@ export async function queryErrorLogs(
      FROM agent_error_logs
      WHERE agent_id = ?
      ORDER BY error_time DESC
-     LIMIT ?`,
-    [agentId, limit],
+     LIMIT ${safeLimit}`,
+    [agentId],
   );
   return rows.map((r) => ({
     ...r,
     time: r.time instanceof Date ? r.time.toISOString() : r.time,
   }));
+}
+
+// ──── Ensure agent_error_logs table exists ────
+
+export async function ensureErrorLogsTable(): Promise<void> {
+  await query(`
+    CREATE TABLE IF NOT EXISTS agent_error_logs (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      agent_id VARCHAR(64) NOT NULL,
+      error_time DATETIME NOT NULL,
+      error_id INT UNSIGNED NOT NULL DEFAULT 0,
+      error_level VARCHAR(32) NOT NULL DEFAULT 'Error',
+      error_source VARCHAR(255) NOT NULL DEFAULT '',
+      error_message TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      INDEX idx_agent_error_logs_agent_id (agent_id),
+      INDEX idx_agent_error_logs_time (agent_id, error_time DESC)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 }
