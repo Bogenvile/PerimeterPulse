@@ -9,8 +9,8 @@ import {
   Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getAsset, getAssetMetrics, getAssetLocations, setApiToken } from "@/lib/api";
-import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint } from "@/lib/types";
+import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, setApiToken } from "@/lib/api";
+import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ErrorLogItem } from "@/lib/types";
 
 function fmt(n: unknown): number {
   const v = Number(n);
@@ -59,6 +59,8 @@ const AssetDetailPage = () => {
   const [error, setError] = useState("");
   const [timeRange, setTimeRange] = useState("-1h");
   const [showErrorDetail, setShowErrorDetail] = useState(false);
+  const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
+  const [loadingErrors, setLoadingErrors] = useState(false);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -122,6 +124,17 @@ const AssetDetailPage = () => {
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
 
   const errorHistory = metrics.filter((m) => Number(m.error_count) > 0);
+
+  // Fetch real error logs when dialog opens
+  useEffect(() => {
+    if (!showErrorDetail || !id || !token) return;
+    setLoadingErrors(true);
+    setApiToken(token);
+    fetchErrorLogs(id, 50)
+      .then(setErrorLogs)
+      .catch(() => setErrorLogs([]))
+      .finally(() => setLoadingErrors(false));
+  }, [showErrorDetail, id, token]);
 
   return (
     <div className="animate-fade-in space-y-5 p-4 md:p-6">
@@ -344,11 +357,11 @@ const AssetDetailPage = () => {
       {/* Error Detail Dialog */}
       {showErrorDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg border border-white/[0.06] bg-card rounded-2xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-2xl border border-white/[0.06] bg-card rounded-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
               <div className="flex items-center gap-2">
                 <Bug className="h-4 w-4 text-red-400" />
-                <h3 className="text-sm font-semibold">Error History (last {timeRange.replace("-", "")})</h3>
+                <h3 className="text-sm font-semibold">System Error Logs (last 50)</h3>
               </div>
               <button
                 onClick={() => setShowErrorDetail(false)}
@@ -357,14 +370,28 @@ const AssetDetailPage = () => {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="p-5 max-h-72 overflow-y-auto space-y-2">
-              {errorHistory.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No errors recorded in this period</p>
+            <div className="p-5 max-h-96 overflow-y-auto space-y-3">
+              {loadingErrors ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
+                </div>
+              ) : errorLogs.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No error logs recorded</p>
               ) : (
-                errorHistory.map((m, idx) => (
-                  <div key={idx} className="flex items-center justify-between rounded-lg border border-white/[0.04] px-3 py-2 text-sm">
-                    <span className="text-muted-foreground text-xs">{new Date(m.time).toLocaleString()}</span>
-                    <span className="font-mono text-red-400">{Number(m.error_count)} error{Number(m.error_count) !== 1 ? 's' : ''}</span>
+                errorLogs.map((log, idx) => (
+                  <div key={idx} className="rounded-lg border border-white/[0.04] bg-white/[0.01] p-3 text-sm space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {new Date(log.time).toLocaleString()}
+                      </span>
+                      <span className="text-xs font-semibold text-red-400 bg-red-500/10 px-2 py-0.5 rounded">{log.level}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate" title={log.source}>
+                      Source: {log.source || "N/A"} {log.event_id ? `(Event ID: ${log.event_id})` : ""}
+                    </p>
+                    <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap break-words">
+                      {log.message || "No message"}
+                    </p>
                   </div>
                 ))
               )}

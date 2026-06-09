@@ -147,6 +147,16 @@ export interface DashboardStats {
   disk_issues: number;
 }
 
+export interface ErrorLogItem {
+  id?: number;
+  time: string;
+  event_id?: number;
+  level: string;
+  source: string;
+  message: string;
+  created_at?: string;
+}
+
 export interface ApiKeyInfo {
   id: string;
   key_prefix: string;

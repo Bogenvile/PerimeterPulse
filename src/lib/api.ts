@@ -1,5 +1,5 @@
 import { getAuthHeaders } from "./auth";
-import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ApiKeyInfo } from "./types";
+import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ApiKeyInfo, ErrorLogItem } from "./types";
 
 const API_BASE = "/api";
 
@@ -69,4 +69,14 @@ export async function createApiKey(label?: string): Promise<{
     method: "POST",
     body: JSON.stringify({ label }),
   });
+}
+
+export async function fetchErrorLogs(
+  id: string,
+  limit?: number,
+): Promise<ErrorLogItem[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return fetchApi<ErrorLogItem[]>(
+    `/assets/${encodeURIComponent(id)}/errors${params}`,
+  );
 }

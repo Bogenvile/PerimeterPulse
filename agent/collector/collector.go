@@ -13,20 +13,29 @@ import (
 	"time"
 )
 
+type ErrorLogItem struct {
+	Time    string `json:"time"`
+	ID      int    `json:"id"`
+	Level   string `json:"level"`
+	Source  string `json:"source"`
+	Message string `json:"message"`
+}
+
 type Metrics struct {
-	CPUPercent        float64 `json:"cpu_percent"`
-	RAMPercent        float64 `json:"ram_percent"`
-	RAMUsedBytes      uint64  `json:"ram_used_bytes"`
-	RAMTotalBytes     uint64  `json:"ram_total_bytes"`
-	StoragePercent    float64 `json:"storage_percent"`
-	StorageUsedBytes  uint64  `json:"storage_used_bytes"`
-	StorageTotalBytes uint64  `json:"storage_total_bytes"`
-	UptimeSeconds     uint64  `json:"uptime_seconds"`
-	NetworkStatus     string  `json:"network_status"`
-	NetworkLatencyMs  float64 `json:"network_latency_ms"`
-	PingLatencyMs     float64 `json:"ping_latency_ms"`
-	ErrorCount        int     `json:"error_count"`
-	Timestamp         string  `json:"timestamp"`
+	CPUPercent        float64        `json:"cpu_percent"`
+	RAMPercent        float64        `json:"ram_percent"`
+	RAMUsedBytes      uint64         `json:"ram_used_bytes"`
+	RAMTotalBytes     uint64         `json:"ram_total_bytes"`
+	StoragePercent    float64        `json:"storage_percent"`
+	StorageUsedBytes  uint64         `json:"storage_used_bytes"`
+	StorageTotalBytes uint64         `json:"storage_total_bytes"`
+	UptimeSeconds     uint64         `json:"uptime_seconds"`
+	NetworkStatus     string         `json:"network_status"`
+	NetworkLatencyMs  float64        `json:"network_latency_ms"`
+	PingLatencyMs     float64        `json:"ping_latency_ms"`
+	ErrorCount        int            `json:"error_count"`
+	ErrorLogs         []ErrorLogItem `json:"error_logs,omitempty"`
+	Timestamp         string         `json:"timestamp"`
 }
 
 type NetworkInfo struct {
@@ -127,11 +136,13 @@ func CollectMetrics() *Metrics {
 		m.UptimeSeconds = getUptime()
 		m.PingLatencyMs = pingLatency()
 		m.NetworkLatencyMs = m.PingLatencyMs
-		m.ErrorCount = getSystemErrorCount()
 		m.NetworkStatus = "up"
 		if m.PingLatencyMs == 0 {
 			m.NetworkStatus = "down"
 		}
+
+		// Ambil error count + error logs detail dari Event Log
+		m.ErrorCount, m.ErrorLogs = getSystemErrors()
 	}
 
 	return m
@@ -202,14 +213,57 @@ func getDefaultGateway() string {
 	return psString("(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -First 1).NextHop")
 }
 
-func getSystemErrorCount() int {
-	s := psString("(Get-WinEvent -FilterHashtable @{LogName='System'; Level=2; StartTime=(Get-Date).AddHours(-1)} -ErrorAction SilentlyContinue).Count")
-	if s == "" {
-		return 0
+// ======== System Error Logs ========
+
+func getSystemErrors() (int, []ErrorLogItem) {
+	psScript := `Get-WinEvent -FilterHashtable @{LogName='System'; Level=2; StartTime=(Get-Date).AddHours(-1)} -MaxEvents 50 -ErrorAction SilentlyContinue | Select-Object @{N='time';E={$_.TimeCreated.ToString('o')}}, @{N='id';E={$_.Id}}, @{N='level';E={$_.LevelDisplayName}}, @{N='source';E={$_.ProviderName}}, @{N='message';E={$_.Message}} | ConvertTo-Json -Compress`
+
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil
 	}
-	var c int
-	fmt.Sscanf(s, "%d", &c)
-	return c
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" || raw == "[]" || raw == "null" {
+		return 0, nil
+	}
+
+	// PowerShell ConvertTo-Json kadang mengembalikan objek tunggal jika hanya 1 hasil
+	var logs []ErrorLogItem
+	if strings.HasPrefix(raw, "[") {
+		if err := json.Unmarshal([]byte(raw), &logs); err != nil {
+			return 0, nil
+		}
+	} else {
+		var single ErrorLogItem
+		if err := json.Unmarshal([]byte(raw), &single); err != nil {
+			return 0, nil
+		}
+		logs = []ErrorLogItem{single}
+	}
+
+	// Bersihkan karakter kontrol dari message (bisa rusak JSON saat dikirim)
+	for i := range logs {
+		logs[i].Message = cleanMessage(logs[i].Message)
+	}
+
+	return len(logs), logs
+}
+
+func cleanMessage(msg string) string {
+	// Hapus karakter kontrol dan newline berlebih
+	msg = strings.ReplaceAll(msg, "\r\n", " | ")
+	msg = strings.ReplaceAll(msg, "\n", " | ")
+	msg = strings.ReplaceAll(msg, "\r", " | ")
+	// Hapus karakter non-printable
+	var b strings.Builder
+	for _, r := range msg {
+		if r >= 32 || r == '\t' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // ======== Helpers ========
@@ -317,7 +371,6 @@ func pingLatency() float64 {
 	return 0
 }
 
-// GeoIP location from ip-api.com
 func geoIPLocation() *Location {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get("http://ip-api.com/json/?fields=lat,lon,city,country,status")

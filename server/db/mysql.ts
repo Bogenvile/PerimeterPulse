@@ -187,3 +187,58 @@ export async function queryLocations(
     time: r.time instanceof Date ? r.time.toISOString() : r.time,
   }));
 }
+
+// ──── Agent Error Logs ────
+
+interface ErrorLogInput {
+  time: string;
+  id: number;
+  level: string;
+  source: string;
+  message: string;
+}
+
+export async function insertErrorLogs(agentId: string, logs: ErrorLogInput[]): Promise<void> {
+  if (logs.length === 0) return;
+
+  const values = logs.map(() => "(?,?,?,?,?,?)").join(",");
+  const params: unknown[] = [];
+  for (const log of logs) {
+    params.push(
+      agentId,
+      log.time ? new Date(log.time) : new Date(),
+      log.id ?? 0,
+      log.level ?? "Error",
+      log.source ?? "",
+      log.message ?? "",
+    );
+  }
+
+  await query(
+    `INSERT INTO agent_error_logs
+      (agent_id, error_time, error_id, error_level, error_source, error_message)
+     VALUES ${values}`,
+    params,
+  );
+}
+
+export async function queryErrorLogs(
+  agentId: string,
+  limit = 100,
+): Promise<Record<string, unknown>[]> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT
+       id, error_time AS time, error_id AS event_id,
+       error_level AS level, error_source AS source, error_message AS message,
+       created_at
+     FROM agent_error_logs
+     WHERE agent_id = ?
+     ORDER BY error_time DESC
+     LIMIT ?`,
+    [agentId, limit],
+  );
+  return rows.map((r) => ({
+    ...r,
+    time: r.time instanceof Date ? r.time.toISOString() : r.time,
+  }));
+}

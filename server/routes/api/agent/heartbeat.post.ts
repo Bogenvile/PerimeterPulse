@@ -1,7 +1,15 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
-import { queryOne, query, insertMetrics, insertLocation } from "../../../db/mysql";
+import { queryOne, query, insertMetrics, insertLocation, insertErrorLogs } from "../../../db/mysql";
 import { validateApiKeyByValue } from "../../../lib/auth";
+
+interface ErrorLogItem {
+  time: string;
+  id: number;
+  level: string;
+  source: string;
+  message: string;
+}
 
 interface HeartbeatBody {
   agent_id: string; api_key: string;
@@ -12,6 +20,7 @@ interface HeartbeatBody {
     network_latency_ms: number;
     ping_latency_ms?: number;
     error_count?: number;
+    error_logs?: ErrorLogItem[];
     gateway_reachable?: boolean; dns_working?: boolean; internet_reachable?: boolean;
     default_gateway?: string;
     disk_health_status?: string; disk_temperature_c?: number;
@@ -40,8 +49,13 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: "Invalid API key" });
   }
 
-  // Write metrics & location to MySQL
-  if (body.metrics) await insertMetrics(body.agent_id, body.metrics);
+  // Write metrics, location & error logs to MySQL
+  if (body.metrics) {
+    await insertMetrics(body.agent_id, body.metrics);
+    if (body.metrics.error_logs && body.metrics.error_logs.length > 0) {
+      await insertErrorLogs(body.agent_id, body.metrics.error_logs);
+    }
+  }
   if (body.location) await insertLocation(body.agent_id, body.location);
 
   // Update asset record
