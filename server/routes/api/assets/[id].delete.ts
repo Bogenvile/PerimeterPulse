@@ -1,7 +1,7 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, createError } from "nitro/h3";
-import { requireAdminAuth } from "../../../../lib/auth";
-import { query, queryOne } from "../../../../db/mysql";
+import { requireAdminAuth } from "../../../lib/auth";
+import { query, queryOne } from "../../../db/mysql";
 
 export default defineHandler(async (event) => {
   await requireAdminAuth(event);
