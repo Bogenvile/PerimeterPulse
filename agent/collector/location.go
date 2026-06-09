@@ -2,40 +2,30 @@ package collector
 
 import (
 	"log"
+	"math/rand"
 )
 
-// LocationData holds coordinates, accuracy, source, and error info.
-type LocationData struct {
-	Latitude      float64 `json:"latitude"`
-	Longitude     float64 `json:"longitude"`
-	AccuracyMeters float64 `json:"accuracy_meters"`
-	Source        string   `json:"source"` // "os", "geoip", "unknown"
-}
-
-// CollectLocation returns the current location of this machine.
-// It tries OS-provided location first (Windows Geolocator / GeoClue),
-// then falls back to GeoIP.
-func CollectLocation() LocationData {
-	loc := collectPlatformLocation()
-	if loc.Source == "unknown" || loc.Source == "geoip" {
-		// Optional: try GeoIP as fallback
-		lat, lng, err := GetGeoIPLocation()
-		if err == nil {
-			loc.Latitude = lat
-			loc.Longitude = lng
-			loc.AccuracyMeters = 5000 // GeoIP ~5 km
-			loc.Source = "geoip"
-		} else {
-			log.Printf("GeoIP fallback failed: %v", err)
-		}
+func CollectLocation() *Location {
+	// Placeholder: in production, get GPS or GeoIP
+	// On Windows, use Windows.Devices.Geolocation API
+	// On Linux, use GeoClue2 D-Bus
+	loc := &Location{
+		Latitude:       0,
+		Longitude:      0,
+		AccuracyMeters: 1000,
+		Source:         "geoip",
 	}
-	// Default to some fallback location if still unknown
+	log.Println("Location collection not fully implemented, using defaults")
 	return loc
 }
 
-// GetGeoIPLocation performs a GeoIP lookup to determine the approximate location.
-func GetGeoIPLocation() (float64, float64, error) {
-	// Stub: in production, call a GeoIP API (e.g., ip-api.com, ipinfo.io)
-	// Returning a default (0,0) and no error means "no location available"
-	return 0.0, 0.0, nil
+// Example stub for GeoIP fallback
+func geoIPLocation() *Location {
+	// Would call an external service or parse IP geolocation
+	return &Location{
+		Latitude:       rand.Float64()*180 - 90,
+		Longitude:      rand.Float64()*360 - 180,
+		AccuracyMeters: 5000,
+		Source:         "geoip",
+	}
 }
