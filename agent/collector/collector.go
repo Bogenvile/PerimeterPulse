@@ -1,138 +1,227 @@
 package collector
 
 import (
-	"net"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/net"
 )
 
 type SystemInfo struct {
-	Hostname          string   `json:"hostname"`
-	OS                string   `json:"os"`
-	OSVersion         string   `json:"os_version"`
-	AgentVersion      string   `json:"agent_version"`
-	MacAddresses      []string `json:"mac_addresses"`
-	IPAddresses       []string `json:"ip_addresses"`
-	CPUModel          string   `json:"cpu_model"`
-	CPUCores          int      `json:"cpu_cores"`
-	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64   `json:"storage_total_bytes"`
-	DiskModel         string   `json:"disk_model"`
-	DiskType          string   `json:"disk_type"`
+	CPUModel      string
+	CPUCores      int
+	RAMTotal      uint64
+	StorageTotal  uint64
+	Hostname      string
+	OS            string
+	OSVersion     string
+	MacAddresses  []string
 }
 
-type Metrics struct {
-	CPUPercent        float64  `json:"cpu_percent"`
-	RAMPercent        float64  `json:"ram_percent"`
-	RAMUsedBytes      uint64   `json:"ram_used_bytes"`
-	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
-	StoragePercent    float64  `json:"storage_percent"`
-	StorageUsedBytes  uint64   `json:"storage_used_bytes"`
-	StorageTotalBytes uint64   `json:"storage_total_bytes"`
-	UptimeSeconds     uint64   `json:"uptime_seconds"`
-	NetworkStatus     string   `json:"network_status"`
-	NetworkLatencyMs  float64  `json:"network_latency_ms"`
-	GatewayReachable  *bool    `json:"gateway_reachable,omitempty"`
-	DNSWorking        *bool    `json:"dns_working,omitempty"`
-	InternetReachable *bool    `json:"internet_reachable,omitempty"`
-	DefaultGateway    string   `json:"default_gateway,omitempty"`
-	DiskHealthStatus  *string  `json:"disk_health_status,omitempty"`
-	DiskTemperatureC  *float64 `json:"disk_temperature_c,omitempty"`
-	Timestamp         string   `json:"timestamp"`
-}
-
-func CollectSystemInfo(hostname string) SystemInfo {
+func CollectSystemInfo() SystemInfo {
 	info := SystemInfo{
-		Hostname:     hostname,
-		OS:           runtime.GOOS,
-		AgentVersion: "2.0.0",
+		Hostname: getHostname(),
+		OS:       runtime.GOOS,
 	}
 
-	if hi, err := host.Info(); err == nil {
-		info.OSVersion = hi.PlatformVersion
-		if info.OSVersion == "" {
-			info.OSVersion = hi.KernelVersion
-		}
+	// OS Version
+	platform, _, version, _ := host.PlatformInformation()
+	info.OSVersion = fmt.Sprintf("%s %s", platform, version)
+
+	// CPU
+	if cpuInfo, err := cpu.Info(); err == nil && len(cpuInfo) > 0 {
+		info.CPUModel = cpuInfo[0].ModelName
+		info.CPUCores = len(cpuInfo)
 	}
 
-	if ci, err := cpu.Info(); err == nil && len(ci) > 0 {
-		info.CPUModel = ci[0].ModelName
-		info.CPUCores = int(ci[0].Cores)
-	} else {
-		info.CPUModel = "Unknown"
-		info.CPUCores = runtime.NumCPU()
+	// RAM
+	if vmem, err := mem.VirtualMemory(); err == nil {
+		info.RAMTotal = vmem.Total
 	}
 
-	if vm, err := mem.VirtualMemory(); err == nil {
-		info.RAMTotalBytes = vm.Total
-	}
+	// Storage - ONLY root physical disk, exclude virtual/loop/snap
+	info.StorageTotal = getPhysicalStorageTotal()
 
-	if parts, err := disk.Partitions(false); err == nil {
-		for _, p := range parts {
-			if u, err := disk.Usage(p.Mountpoint); err == nil {
-				info.StorageTotalBytes += u.Total
-			}
-		}
-	}
-
-	info.DiskModel = "Unknown"
-	info.DiskType = "unknown"
-
-	ifaces, err := net.Interfaces()
-	if err == nil {
-		for _, iface := range ifaces {
-			if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-				continue
-			}
-			if mac := iface.HardwareAddr.String(); mac != "" {
-				info.MacAddresses = append(info.MacAddresses, mac)
-			}
-			addrs, _ := iface.Addrs()
-			for _, addr := range addrs {
-				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.IsGlobalUnicast() {
-					info.IPAddresses = append(info.IPAddresses, ipnet.IP.String())
-				}
-			}
-		}
-	}
+	// MAC addresses
+	info.MacAddresses = getMacAddresses()
 
 	return info
 }
 
-func CollectMetrics() Metrics {
-	m := Metrics{Timestamp: time.Now().UTC().Format(time.RFC3339)}
+func getHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return hostname
+}
 
-	if percent, err := cpu.Percent(1*time.Second, false); err == nil && len(percent) > 0 {
-		m.CPUPercent = percent[0]
+func getPhysicalStorageTotal() uint64 {
+	switch runtime.GOOS {
+	case "linux":
+		return getLinuxPhysicalStorage()
+	case "windows":
+		return getWindowsPhysicalStorage()
+	default:
+		return getStorageFromRootPartition()
+	}
+}
+
+func getLinuxPhysicalStorage() uint64 {
+	// Use lsblk to get the physical disk size (not partition)
+	// This avoids counting virtual/loop/snap disks
+	cmd := exec.Command("lsblk", "-b", "-d", "-o", "NAME,SIZE,TYPE,MOUNTPOINT", "-n")
+	out, err := cmd.Output()
+	if err != nil {
+		return getStorageFromRootPartition()
 	}
 
-	if vm, err := mem.VirtualMemory(); err == nil {
-		m.RAMPercent = vm.UsedPercent
-		m.RAMUsedBytes = vm.Used
-		m.RAMTotalBytes = vm.Total
-	}
+	var total uint64
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
 
-	if parts, err := disk.Partitions(false); err == nil {
-		for _, p := range parts {
-			if p.Mountpoint == "/" || p.Mountpoint == "C:" {
-				if u, err := disk.Usage(p.Mountpoint); err == nil {
-					m.StoragePercent = u.UsedPercent
-					m.StorageUsedBytes = u.Used
-					m.StorageTotalBytes = u.Total
-				}
-				break
-			}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		name := fields[0]
+		diskType := ""
+		if len(fields) >= 3 {
+			diskType = fields[2]
+		}
+
+		// Skip loop, ram, snap, sr (CD-ROM), and virtual devices
+		if strings.HasPrefix(name, "loop") ||
+			strings.HasPrefix(name, "ram") ||
+			strings.HasPrefix(name, "sr") ||
+			strings.Contains(name, "snap") {
+			continue
+		}
+
+		// Only count physical disks, not partitions
+		if diskType != "disk" {
+			continue
+		}
+
+		sizeBytes, err := strconv.ParseUint(fields[1], 10, 64)
+		if err == nil && sizeBytes > 0 {
+			total += sizeBytes
 		}
 	}
 
+	if total == 0 {
+		return getStorageFromRootPartition()
+	}
+
+	return total
+}
+
+func getWindowsPhysicalStorage() uint64 {
+	// PowerShell: Get total physical disk size (not partition)
+	cmd := exec.Command("powershell", "-Command",
+		"(Get-PhysicalDisk | Measure-Object -Property Size -Sum).Sum")
+	out, err := cmd.Output()
+	if err == nil {
+		val := strings.TrimSpace(string(out))
+		if size, err := strconv.ParseUint(val, 10, 64); err == nil && size > 0 {
+			return size
+		}
+	}
+
+	// Fallback: root partition
+	return getStorageFromRootPartition()
+}
+
+func getStorageFromRootPartition() uint64 {
+	usage, err := disk.Usage("/")
+	if err != nil {
+		return 0
+	}
+	return usage.Total
+}
+
+func getMacAddresses() []string {
+	var macs []string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return macs
+	}
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		if iface.HardwareAddr != nil && len(iface.HardwareAddr) > 0 {
+			macs = append(macs, iface.HardwareAddr.String())
+		}
+	}
+	return macs
+}
+
+type Metrics struct {
+	CPUPercent       float64
+	RAMPercent       float64
+	RAMUsed          uint64
+	RAMTotal         uint64
+	StoragePercent   float64
+	StorageUsed      uint64
+	StorageTotal     uint64
+	UptimeSeconds    uint64
+	NetworkStatus    string
+	NetworkLatencyMs float64
+	DiskHealthStatus string
+	DiskTemperatureC int
+}
+
+func CollectMetrics() Metrics {
+	m := Metrics{}
+
+	// CPU
+	if percent, err := cpu.Percent(time.Second, false); err == nil && len(percent) > 0 {
+		m.CPUPercent = math.Round(percent[0]*10) / 10
+	}
+
+	// RAM
+	if vmem, err := mem.VirtualMemory(); err == nil {
+		m.RAMPercent = math.Round(vmem.UsedPercent*10) / 10
+		m.RAMUsed = vmem.Used
+		m.RAMTotal = vmem.Total
+	}
+
+	// Storage (root partition for percent usage)
+	if usage, err := disk.Usage("/"); err == nil {
+		m.StoragePercent = math.Round(usage.UsedPercent*10) / 10
+		m.StorageUsed = usage.Used
+		m.StorageTotal = usage.Total
+	}
+
+	// Uptime
 	if uptime, err := host.Uptime(); err == nil {
 		m.UptimeSeconds = uptime
 	}
+
+	// Network diagnostics (dari diag.go)
+	m.NetworkStatus, m.NetworkLatencyMs = RunNetworkDiagnostics()
+
+	// Disk info (dari smart.go)
+	diskInfo := CollectDiskInfo()
+	m.DiskHealthStatus = diskInfo.HealthStatus
+	m.DiskTemperatureC = diskInfo.Temperature
 
 	return m
 }
