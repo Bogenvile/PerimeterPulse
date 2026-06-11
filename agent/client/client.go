@@ -8,8 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
+	"runtime"
+	"time"
 )
 
 // HTTPClient - Client untuk komunikasi dengan server
@@ -35,19 +35,10 @@ type CommandStatusPayload struct {
 	ExitCode *int   `json:"exit_code,omitempty"`
 }
 
-// CommandResult - Hasil eksekusi command
-type CommandResult struct {
-	CommandID int
-	Output    string
-	Error     string
-	ExitCode  int
-	ExecTime  string
-}
-
 // NewHTTPClient membuat client baru
 func NewHTTPClient(baseURL string) *HTTPClient {
 	return &HTTPClient{
-		BaseURL:    strings.TrimRight(baseURL, "/"),
+		BaseURL:    baseURL,
 		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -56,7 +47,7 @@ func NewHTTPClient(baseURL string) *HTTPClient {
 func (c *HTTPClient) Register(payload any) error {
 	url := fmt.Sprintf("%s/api/agent/register", c.BaseURL)
 	body, _ := json.Marshal(payload)
-	
+
 	resp, err := c.HTTPClient.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return err
@@ -91,7 +82,7 @@ func (c *HTTPClient) Heartbeat(payload map[string]any) error {
 // FetchPendingCommands mengambil command yang pending
 func (c *HTTPClient) FetchPendingCommands(agentID, apiKey string) ([]PendingCommand, error) {
 	url := fmt.Sprintf("%s/api/agent/commands?agent_id=%s&api_key=%s", c.BaseURL, agentID, apiKey)
-	
+
 	resp, err := c.HTTPClient.Get(url)
 	if err != nil {
 		return nil, err
@@ -133,9 +124,9 @@ func (c *HTTPClient) ReportCommandStatus(commandID int, agentID, apiKey string, 
 }
 
 // CheckForUpdate memeriksa update baru
-func (c *HTTPClient) CheckForUpdate(agentID, apiKey, os, arch string) (string, string, error) {
-	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s&arch=%s",
-		c.BaseURL, agentID, apiKey, os, arch)
+func (c *HTTPClient) CheckForUpdate(agentID, apiKey, os string) (string, string, error) {
+	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s",
+		c.BaseURL, agentID, apiKey, os)
 
 	resp, err := c.HTTPClient.Get(url)
 	if err != nil {
@@ -148,7 +139,7 @@ func (c *HTTPClient) CheckForUpdate(agentID, apiKey, os, arch string) (string, s
 	}
 
 	var result struct {
-		Version    string `json:"version"`
+		Version     string `json:"version"`
 		DownloadURL string `json:"download_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

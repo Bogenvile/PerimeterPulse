@@ -2,7 +2,6 @@ package collector
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"net"
 	"net/http"
@@ -15,52 +14,52 @@ import (
 
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/mem"
-	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/host"
+	"github.com/shirou/gopsutil/v4/mem"
+	gonet "github.com/shirou/gopsutil/v4/net"
 )
 
 // RegistrationPayload - Data saat agent pertama kali register
 type RegistrationPayload struct {
-	Hostname       string   `json:"hostname"`
-	OS             string   `json:"os"`
-	OSVersion      string   `json:"os_version"`
-	AgentVersion   string   `json:"agent_version"`
-	APIKey         string   `json:"api_key"`
-	MACAddresses   []string `json:"mac_addresses"`
-	IPAddresses    []string `json:"ip_addresses,omitempty"`
-	CPUModel       string   `json:"cpu_model"`
-	CPUCores       int      `json:"cpu_cores,omitempty"`
-	RAMTotalBytes  uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64 `json:"storage_total_bytes"`
-	DiskModel      string   `json:"disk_model,omitempty"`
-	DiskType       string   `json:"disk_type,omitempty"`
-	WiFiSSID       string   `json:"wifi_ssid,omitempty"`
-	WiFiSignalDBM  int      `json:"wifi_signal_dbm,omitempty"`
-	NetworkSpeedMbps int   `json:"network_speed_mbps,omitempty"`
+	Hostname          string   `json:"hostname"`
+	OS                string   `json:"os"`
+	OSVersion         string   `json:"os_version"`
+	AgentVersion      string   `json:"agent_version"`
+	APIKey            string   `json:"api_key"`
+	MACAddresses      []string `json:"mac_addresses"`
+	IPAddresses       []string `json:"ip_addresses,omitempty"`
+	CPUModel          string   `json:"cpu_model"`
+	CPUCores          int      `json:"cpu_cores,omitempty"`
+	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	DiskModel         string   `json:"disk_model,omitempty"`
+	DiskType          string   `json:"disk_type,omitempty"`
+	WiFiSSID          string   `json:"wifi_ssid,omitempty"`
+	WiFiSignalDBM     int      `json:"wifi_signal_dbm,omitempty"`
+	NetworkSpeedMbps  int      `json:"network_speed_mbps,omitempty"`
 }
 
 // MetricsData - Data metrics untuk heartbeat
 type MetricsData struct {
-	CPUPercent      float64 `json:"cpu_percent"`
-	RAMPercent      float64 `json:"ram_percent"`
-	RAMUsedBytes    uint64  `json:"ram_used_bytes"`
-	RAMTotalBytes   uint64  `json:"ram_total_bytes"`
-	StoragePercent  float64 `json:"storage_percent"`
-	StorageUsedBytes uint64 `json:"storage_used_bytes"`
-	StorageTotalBytes uint64 `json:"storage_total_bytes"`
-	UptimeSeconds   float64 `json:"uptime_seconds"`
-	NetworkStatus   string  `json:"network_status"`
-	NetworkLatencyMs float64 `json:"network_latency_ms"`
-	PingLatencyMs   float64 `json:"ping_latency_ms,omitempty"`
-	ErrorCount      int     `json:"error_count,omitempty"`
-	GatewayReachable bool   `json:"gateway_reachable,omitempty"`
-	DNSWorking      bool    `json:"dns_working,omitempty"`
-	InternetReachable bool `json:"internet_reachable,omitempty"`
-	DefaultGateway  string  `json:"default_gateway,omitempty"`
-	DiskHealthStatus string `json:"disk_health_status,omitempty"`
-	DiskTemperatureC float64 `json:"disk_temperature_c,omitempty"`
-	Timestamp       string  `json:"timestamp"`
+	CPUPercent        float64 `json:"cpu_percent"`
+	RAMPercent        float64 `json:"ram_percent"`
+	RAMUsedBytes      uint64  `json:"ram_used_bytes"`
+	RAMTotalBytes     uint64  `json:"ram_total_bytes"`
+	StoragePercent    float64 `json:"storage_percent"`
+	StorageUsedBytes  uint64  `json:"storage_used_bytes"`
+	StorageTotalBytes uint64  `json:"storage_total_bytes"`
+	UptimeSeconds     float64 `json:"uptime_seconds"`
+	NetworkStatus     string  `json:"network_status"`
+	NetworkLatencyMs  float64 `json:"network_latency_ms"`
+	PingLatencyMs     float64 `json:"ping_latency_ms,omitempty"`
+	ErrorCount        int     `json:"error_count,omitempty"`
+	GatewayReachable  bool    `json:"gateway_reachable,omitempty"`
+	DNSWorking        bool    `json:"dns_working,omitempty"`
+	InternetReachable bool    `json:"internet_reachable,omitempty"`
+	DefaultGateway    string  `json:"default_gateway,omitempty"`
+	DiskHealthStatus  string  `json:"disk_health_status,omitempty"`
+	DiskTemperatureC  float64 `json:"disk_temperature_c,omitempty"`
+	Timestamp         string  `json:"timestamp"`
 }
 
 // LocationData - Data lokasi
@@ -76,12 +75,12 @@ type LocationData struct {
 
 // NetworkInfo - Data network untuk heartbeat
 type NetworkInfo struct {
-	WiFiSSID        string   `json:"wifi_ssid"`
-	WiFiSignalDBM   int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int    `json:"network_speed_mbps"`
-	IPAddresses     []string `json:"ip_addresses"`
-	WiFiIP          string   `json:"wifi_ip,omitempty"`
-	GatewayIP       string   `json:"gateway_ip,omitempty"`
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps int      `json:"network_speed_mbps"`
+	IPAddresses      []string `json:"ip_addresses"`
+	WiFiIP           string   `json:"wifi_ip,omitempty"`
+	GatewayIP        string   `json:"gateway_ip,omitempty"`
 }
 
 // CollectInfo mengumpulkan informasi sistem untuk registrasi
@@ -121,7 +120,8 @@ func CollectInfo(apiKey string) RegistrationPayload {
 		if err == nil && usage.Total > info.StorageTotalBytes {
 			info.StorageTotalBytes = usage.Total
 			info.DiskModel = p.Device
-			if strings.Contains(strings.ToLower(p.Fstype), "ntfs") || strings.Contains(strings.ToLower(p.Fstype), "ext4") {
+			fs := strings.ToLower(p.Fstype)
+			if strings.Contains(fs, "ntfs") || strings.Contains(fs, "ext4") || strings.Contains(fs, "apfs") {
 				info.DiskType = "HDD"
 			} else {
 				info.DiskType = "SSD"
@@ -130,20 +130,14 @@ func CollectInfo(apiKey string) RegistrationPayload {
 	}
 
 	// MAC & IP Addresses
-	interfaces, _ := net.IOCounters(true)
-	for _, iface := range interfaces {
-		if iface.Name == "lo" || iface.Name == "Loopback" {
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		if iface.Name == "lo" || strings.HasPrefix(iface.Name, "Loopback") || (iface.Flags&net.FlagLoopback != 0) {
 			continue
 		}
-		// MAC
-		if iface.Name != "" {
-			// Try to get MAC from net.Interfaces
-			if netIface, err := net.InterfaceByName(iface.Name); err == nil {
-				info.MACAddresses = append(info.MACAddresses, netIface.HardwareAddr.String())
-			}
-		}
-		// IP
-		addrs, _ := net.InterfaceAddrs()
+		info.MACAddresses = append(info.MACAddresses, iface.HardwareAddr.String())
+		
+		addrs, _ := iface.Addrs()
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 				if ipnet.IP.To4() != nil {
@@ -170,8 +164,7 @@ func CollectInfo(apiKey string) RegistrationPayload {
 					signal := strings.TrimSpace(parts[1])
 					signal = strings.TrimSuffix(signal, "%")
 					if sig, err := strconv.Atoi(signal); err == nil {
-						// Convert percentage to dBm (approximate)
-						info.WiFiSignalDBM = -100 + (sig * 100 / 100)
+						info.WiFiSignalDBM = -100 + sig
 					}
 				}
 			}
@@ -266,9 +259,9 @@ func CollectNetwork() NetworkInfo {
 	netInfo := NetworkInfo{}
 
 	// IP Addresses
-	interfaces, _ := net.Interfaces()
-	for _, iface := range interfaces {
-		if iface.Name == "lo" || iface.Flags&net.FlagLoopback != 0 {
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		if iface.Name == "lo" || strings.HasPrefix(iface.Name, "Loopback") || (iface.Flags&net.FlagLoopback != 0) {
 			continue
 		}
 		addrs, _ := iface.Addrs()
@@ -306,10 +299,9 @@ func CollectNetwork() NetworkInfo {
 	}
 
 	// Network Speed (approximate)
-	ioCounters, _ := net.IOCounters(true)
+	ioCounters, _ := gonet.IOCounters(true)
 	for _, counter := range ioCounters {
 		if counter.BytesSent > 0 || counter.BytesRecv > 0 {
-			// Calculate approximate speed in Mbps
 			totalBytes := counter.BytesSent + counter.BytesRecv
 			speedMbps := float64(totalBytes) * 8 / 1000000 / 60 // per minute average
 			netInfo.NetworkSpeedMbps = int(speedMbps)
@@ -467,9 +459,7 @@ func checkSMART(metrics *MetricsData) {
 		}
 	} else {
 		// Linux: Use smartmontools
-		// Try /dev/sda first
 		smartCheckDisk("/dev/sda", metrics)
-		// Try /dev/nvme0
 		if metrics.DiskHealthStatus == "unknown" {
 			smartCheckDisk("/dev/nvme0n1", metrics)
 		}
