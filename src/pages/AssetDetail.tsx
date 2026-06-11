@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
@@ -162,6 +164,13 @@ const AssetDetailPage = () => {
 
   const visibleTabs = tabs.filter((t) => !t.adminOnly || isAdmin);
 
+  // Improved Disk Display Logic
+  const isDriveLetterOnly = asset.disk_model && asset.disk_model.includes(":");
+  const diskDisplayName = isDriveLetterOnly ? (asset.disk_type || "Disk") : (asset.disk_model || "Unknown");
+  const diskDisplaySub = isDriveLetterOnly
+    ? `${asset.disk_model} · ${asset.disk_type || "Unknown"} · ${asset.disk_health_status === 'ok' ? 'OK' : asset.disk_health_status}`
+    : `${asset.disk_type || "Unknown"} · ${asset.disk_health_status === 'ok' ? 'OK' : asset.disk_health_status}`;
+
   return (
     <div className="animate-fade-in space-y-6 p-6 md:p-8">
       {/* Header */}
@@ -213,7 +222,7 @@ const AssetDetailPage = () => {
 
       {/* Network & Disk Info Cards */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
-        <InfoCard icon={<Disc className="h-4 w-4" />} label="Disk" value={asset.disk_model || "Unknown"} sub={`${asset.disk_type || "unknown"} · ${getHealthColor(asset.disk_health_status).includes("emerald") ? "OK" : asset.disk_health_status || "unknown"}`} />
+        <InfoCard icon={<Disc className="h-4 w-4" />} label="Disk" value={diskDisplayName} sub={diskDisplaySub} />
         <InfoCard icon={<Thermometer className="h-4 w-4" />} label="Temperature" value={asset.disk_temperature_c != null ? `${asset.disk_temperature_c}°C` : "N/A"} />
         <InfoCard icon={<Wifi className="h-4 w-4" />} label="WiFi" value={asset.wifi_ssid || "N/A"} sub={hasSignal ? `${asset.wifi_signal_dbm} dBm · ${signalInfo.text}` : signalInfo.text} />
         <InfoCard icon={<Network className="h-4 w-4" />} label="Network" value={asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"} sub={asset.gateway_ip ? `GW: ${asset.gateway_ip}` : undefined} />
