@@ -7,7 +7,7 @@ import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import { RemoteCommands } from "@/components/dashboard/RemoteCommands";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, Network,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X, Trash2,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X, Trash2, Zap,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
@@ -42,6 +42,22 @@ function getHealthColor(status?: string): string {
     case "critical": return "text-destructive";
     default: return "text-muted-foreground";
   }
+}
+
+function getPingColor(ms: number | null): string {
+  if (ms == null || ms <= 0) return "text-muted-foreground";
+  if (ms < 30) return "text-emerald-600";
+  if (ms < 100) return "text-primary";
+  if (ms < 200) return "text-amber-600";
+  return "text-destructive";
+}
+
+function getPingLabel(ms: number | null): string {
+  if (ms == null || ms <= 0) return "N/A";
+  if (ms < 30) return "Excellent";
+  if (ms < 100) return "Good";
+  if (ms < 200) return "Fair";
+  return "High latency";
 }
 
 const timeRangeOptions = [
@@ -196,11 +212,18 @@ const AssetDetailPage = () => {
       </div>
 
       {/* Network & Disk Info Cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <InfoCard icon={<Disc className="h-4 w-4" />} label="Disk" value={asset.disk_model || "Unknown"} sub={`${asset.disk_type || "unknown"} · ${getHealthColor(asset.disk_health_status).includes("emerald") ? "OK" : asset.disk_health_status || "unknown"}`} />
         <InfoCard icon={<Thermometer className="h-4 w-4" />} label="Temperature" value={asset.disk_temperature_c != null ? `${asset.disk_temperature_c}°C` : "N/A"} />
         <InfoCard icon={<Wifi className="h-4 w-4" />} label="WiFi" value={asset.wifi_ssid || "N/A"} sub={hasSignal ? `${asset.wifi_signal_dbm} dBm · ${signalInfo.text}` : signalInfo.text} />
-        <InfoCard icon={<Network className="h-4 w-4" />} label="Network" value={asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"} sub={`Ping: ${fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}`} />
+        <InfoCard icon={<Network className="h-4 w-4" />} label="Network" value={asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"} sub={asset.gateway_ip ? `GW: ${asset.gateway_ip}` : undefined} />
+        <InfoCard
+          icon={<Zap className="h-4 w-4" />}
+          label="Ping (8.8.8.8)"
+          value={asset.ping_latency_ms != null && asset.ping_latency_ms > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}
+          valueColor={getPingColor(asset.ping_latency_ms)}
+          sub={getPingLabel(asset.ping_latency_ms)}
+        />
       </div>
 
       {/* Error Logs Card */}
@@ -347,14 +370,14 @@ const AssetDetailPage = () => {
   );
 };
 
-function InfoCard({ icon, label, value, sub, mono }: { icon: React.ReactNode; label: string; value: string; sub?: string; mono?: boolean }) {
+function InfoCard({ icon, label, value, sub, mono, valueColor }: { icon: React.ReactNode; label: string; value: string; sub?: string; mono?: boolean; valueColor?: string }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center gap-2 text-muted-foreground mb-2">
         {icon}
         <span className="text-xs font-medium">{label}</span>
       </div>
-      <p className={`text-sm font-semibold truncate ${mono ? "font-mono" : ""}`} title={value}>{value}</p>
+      <p className={`text-sm font-semibold truncate ${mono ? "font-mono" : ""} ${valueColor || ""}`} title={value}>{value}</p>
       {sub && <p className="text-xs text-muted-foreground mt-0.5 truncate">{sub}</p>}
     </div>
   );
