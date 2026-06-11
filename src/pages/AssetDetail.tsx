@@ -203,6 +203,31 @@ const AssetDetailPage = () => {
         <InfoCard icon={<Network className="h-4 w-4" />} label="Network" value={asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"} sub={`Ping: ${fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}`} />
       </div>
 
+      {/* Error Logs Card */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4">
+          <div className="flex items-center gap-2">
+            <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${asset.error_count > 0 ? "bg-destructive/10" : "bg-emerald-50"}`}>
+              <Bug className={`h-4 w-4 ${asset.error_count > 0 ? "text-destructive" : "text-emerald-600"}`} />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Error Logs</h3>
+              <p className="text-xs text-muted-foreground">
+                {asset.error_count > 0
+                  ? `${asset.error_count} error${asset.error_count > 1 ? "s" : ""} recorded`
+                  : "No errors recorded"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowErrorDetail(true)}
+            className="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            View Logs
+          </button>
+        </div>
+      </div>
+
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-border">
         {visibleTabs.map((tab) => (
