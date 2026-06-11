@@ -1,8 +1,6 @@
 package collector
 
 import (
-	"encoding/json"
-	"net/http"
 	"time"
 )
 
@@ -14,9 +12,9 @@ type Location struct {
 }
 
 func GetLocation() Location {
-	// Fallback ke GeoIP
+	// Placeholder location (Jakarta) until GeoIP is fully implemented
 	return Location{
-		Latitude:  -6.2088, // Jakarta
+		Latitude:  -6.2088,
 		Longitude: 106.8456,
 		Source:    "geoip",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
