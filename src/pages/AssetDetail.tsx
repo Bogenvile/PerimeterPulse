@@ -8,7 +8,7 @@ import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import { RemoteTerminal } from "@/components/dashboard/RemoteTerminal";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X, Terminal,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
