@@ -155,12 +155,12 @@ const LoginPage = () => {
             {/* Glow effect behind card */}
             <div className="absolute -inset-1 rounded-[2rem] bg-gradient-to-r from-blue-500/20 via-violet-500/10 to-emerald-500/20 blur-xl opacity-50" />
 
-            <Card className="relative border-white/[0.08] bg-card/80 backdrop-blur-xl shadow-2xl overflow-hidden">
+            <Card className="relative border-black/[0.08] bg-white/80 backdrop-blur-xl shadow-2xl overflow-hidden">
               {/* Card header with gradient */}
-              <div className="border-b border-white/[0.06] bg-gradient-to-r from-blue-600/10 via-transparent to-violet-600/10 px-6 py-5">
+              <div className="border-b border-black/[0.06] bg-gradient-to-r from-blue-600/10 via-transparent to-violet-600/10 px-6 py-5">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600/15 ring-1 ring-blue-500/20">
-                    <User className="h-5 w-5 text-blue-400" />
+                    <User className="h-5 w-5 text-blue-600" />
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-foreground">Welcome Back</h2>
@@ -173,14 +173,14 @@ const LoginPage = () => {
               <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 {error && (
                   <div
-                    className={`flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4 transition-all ${mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"}`}
+                    className={`flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-50 p-4 transition-all ${mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"}`}
                   >
-                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-red-500/10">
-                      <AlertCircle className="h-4 w-4 text-red-400" />
+                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-red-100">
+                      <AlertCircle className="h-4 w-4 text-red-500" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-red-400">Authentication Failed</p>
-                      <p className="mt-0.5 text-xs text-red-400/70">{error}</p>
+                      <p className="text-sm font-medium text-red-600">Authentication Failed</p>
+                      <p className="mt-0.5 text-xs text-red-500">{error}</p>
                     </div>
                   </div>
                 )}
@@ -193,7 +193,7 @@ const LoginPage = () => {
                     </label>
                     <div className="relative group">
                       <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
-                        <User className="h-4 w-4 text-muted-foreground/50 group-focus-within:text-blue-400 transition-colors" />
+                        <User className="h-4 w-4 text-muted-foreground/50 group-focus-within:text-blue-600 transition-colors" />
                       </div>
                       <input
                         type="text"
@@ -202,7 +202,7 @@ const LoginPage = () => {
                         placeholder="Enter your username"
                         autoComplete="username"
                         required
-                        className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] py-3 pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:bg-white/[0.05] transition-all"
+                        className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all"
                       />
                     </div>
                   </div>
@@ -214,7 +214,7 @@ const LoginPage = () => {
                     </label>
                     <div className="relative group">
                       <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
-                        <Lock className="h-4 w-4 text-muted-foreground/50 group-focus-within:text-blue-400 transition-colors" />
+                        <Lock className="h-4 w-4 text-muted-foreground/50 group-focus-within:text-blue-600 transition-colors" />
                       </div>
                       <input
                         type={showPassword ? "text" : "password"}
@@ -223,12 +223,12 @@ const LoginPage = () => {
                         placeholder="Enter your password"
                         autoComplete="current-password"
                         required
-                        className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] py-3 pl-11 pr-12 text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:bg-white/[0.05] transition-all"
+                        className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-11 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-4 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                        className="absolute inset-y-0 right-0 flex items-center pr-4 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
                       >
                         {showPassword ? (
                           <EyeOff className="h-4 w-4" />
@@ -245,10 +245,10 @@ const LoginPage = () => {
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="group relative w-full overflow-hidden rounded-xl bg-blue-600 py-3.5 text-sm font-semibold text-white transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:ring-offset-2 focus:ring-offset-background"
+                    className="group relative w-full overflow-hidden rounded-xl bg-blue-600 py-3.5 text-sm font-semibold text-white transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:ring-offset-2 focus:ring-offset-white"
                   >
                     {/* Button shine effect */}
-                    <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:translate-x-full transition-transform duration-700" />
+                    <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:translate-x-full transition-transform duration-700" />
 
                     <span className="relative flex items-center justify-center gap-2">
                       {submitting ? (
@@ -265,25 +265,12 @@ const LoginPage = () => {
                     </span>
                   </button>
                 </div>
-
-                {/* Divider */}
-                <div className="relative flex items-center gap-3 py-2">
-                  <div className="h-px flex-1 bg-white/[0.06]" />
-                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Secured by JWT</span>
-                  <div className="h-px flex-1 bg-white/[0.06]" />
-                </div>
-
-                {/* Security badge */}
-                <div className="flex items-center justify-center gap-2 text-muted-foreground/50">
-                  <Shield className="h-3.5 w-3.5" />
-                  <span className="text-[10px] font-medium">End-to-end encrypted session</span>
-                </div>
               </form>
             </Card>
           </div>
 
           {/* Footer */}
-          <p className="mt-8 text-center text-[10px] text-muted-foreground/40">
+          <p className="mt-8 text-center text-[10px] text-muted-foreground/60">
             © {new Date().getFullYear()} PerimeterPulse — IT Infrastructure Monitoring Platform
           </p>
         </div>
@@ -301,9 +288,9 @@ function FeatureCard({ icon, title, description, color }: {
   color: "blue" | "emerald" | "violet";
 }) {
   const colors = {
-    blue: { bg: "bg-blue-500/5", border: "border-blue-500/10", icon: "text-blue-400" },
-    emerald: { bg: "bg-emerald-500/5", border: "border-emerald-500/10", icon: "text-emerald-400" },
-    violet: { bg: "bg-violet-500/5", border: "border-violet-500/10", icon: "text-violet-400" },
+    blue: { bg: "bg-blue-50", border: "border-blue-100", icon: "text-blue-600" },
+    emerald: { bg: "bg-emerald-50", border: "border-emerald-100", icon: "text-emerald-600" },
+    violet: { bg: "bg-violet-50", border: "border-violet-100", icon: "text-violet-600" },
   };
   const c = colors[color];
 
