@@ -3,7 +3,9 @@ package collector
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -15,22 +17,22 @@ import (
 // ──── Types — must match dashboard ────
 
 type RegistrationInfo struct {
-	Hostname         string   `json:"hostname"`
-	OS               string   `json:"os"`
-	OSVersion        string   `json:"os_version"`
-	AgentVersion     string   `json:"agent_version"`
-	MACAddresses     []string `json:"mac_addresses"`
-	IPAddresses      []string `json:"ip_addresses"`
-	CPUModel         string   `json:"cpu_model"`
-	CPUCores         int      `json:"cpu_cores"`
-	RAMTotalBytes    uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64  `json:"storage_total_bytes"`
-	DiskModel        string   `json:"disk_model"`
-	DiskType         string   `json:"disk_type"`
-	WiFiSSID         string   `json:"wifi_ssid"`
-	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int      `json:"network_speed_mbps"`
-	APIKey           string   `json:"api_key"`
+	Hostname          string   `json:"hostname"`
+	OS                string   `json:"os"`
+	OSVersion         string   `json:"os_version"`
+	AgentVersion      string   `json:"agent_version"`
+	MACAddresses      []string `json:"mac_addresses"`
+	IPAddresses       []string `json:"ip_addresses"`
+	CPUModel          string   `json:"cpu_model"`
+	CPUCores          int      `json:"cpu_cores"`
+	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	DiskModel         string   `json:"disk_model"`
+	DiskType          string   `json:"disk_type"`
+	WiFiSSID          string   `json:"wifi_ssid"`
+	WiFiSignalDBM     int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps  int      `json:"network_speed_mbps"`
+	APIKey            string   `json:"api_key"`
 }
 
 type MetricsData struct {
@@ -51,18 +53,18 @@ type MetricsData struct {
 	Timestamp         string  `json:"timestamp"`
 
 	// Network diagnostics
-	GatewayReachable   bool   `json:"gateway_reachable"`
-	DNSWorking         bool   `json:"dns_working"`
-	InternetReachable  bool   `json:"internet_reachable"`
-	DefaultGateway     string `json:"default_gateway"`
+	GatewayReachable  bool   `json:"gateway_reachable"`
+	DNSWorking        bool   `json:"dns_working"`
+	InternetReachable bool   `json:"internet_reachable"`
+	DefaultGateway    string `json:"default_gateway"`
 }
 
 type LocationData struct {
-	Latitude        float64 `json:"latitude"`
-	Longitude       float64 `json:"longitude"`
-	AccuracyMeters  int     `json:"accuracy_meters"`
-	Source          string  `json:"source"`
-	Timestamp       string  `json:"timestamp"`
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	AccuracyMeters int     `json:"accuracy_meters"`
+	Source         string  `json:"source"`
+	Timestamp      string  `json:"timestamp"`
 }
 
 type NetworkInfoData struct {
@@ -92,22 +94,22 @@ func collectInfo(apiKey string) RegistrationInfo {
 	cpuModel, cpuCores := detectCPU()
 
 	return RegistrationInfo{
-		Hostname:         hn,
-		OS:               osName,
-		OSVersion:        osVer,
-		AgentVersion:     "1.2.0",
-		MACAddresses:     macs,
-		IPAddresses:      ips,
-		CPUModel:         cpuModel,
-		CPUCores:         cpuCores,
-		RAMTotalBytes:    totalRAM,
+		Hostname:          hn,
+		OS:                osName,
+		OSVersion:         osVer,
+		AgentVersion:      "1.2.0",
+		MACAddresses:      macs,
+		IPAddresses:       ips,
+		CPUModel:          cpuModel,
+		CPUCores:          cpuCores,
+		RAMTotalBytes:     totalRAM,
 		StorageTotalBytes: totalDisk,
-		DiskModel:        diskModel,
-		DiskType:         diskType,
-		WiFiSSID:         wifiInfo.SSID,
-		WiFiSignalDBM:    wifiInfo.SignalDBM,
-		NetworkSpeedMbps: wifiInfo.LinkSpeed,
-		APIKey:           apiKey,
+		DiskModel:         diskModel,
+		DiskType:          diskType,
+		WiFiSSID:          wifiInfo.SSID,
+		WiFiSignalDBM:     wifiInfo.SignalDBM,
+		NetworkSpeedMbps:  wifiInfo.LinkSpeed,
+		APIKey:            apiKey,
 	}
 }
 
@@ -222,7 +224,6 @@ func detectWindowsVersion() (string, string) {
 		return "Windows", ""
 	}
 	ver := strings.TrimSpace(string(out))
-	// "Microsoft Windows [Version 10.0.19045.5246]" -> "10.0.19045"
 	idx := strings.Index(ver, "Version")
 	if idx >= 0 {
 		verPart := strings.TrimSpace(ver[idx+len("Version"):])
@@ -339,7 +340,6 @@ func getUptime() uint64 {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "LastBootUpTime=") {
 			bootStr := strings.TrimPrefix(line, "LastBootUpTime=")
-			// Format: 20250527092743.500000+420
 			if len(bootStr) >= 14 {
 				y, _ := strconv.Atoi(bootStr[0:4])
 				m, _ := strconv.Atoi(bootStr[4:6])
@@ -393,7 +393,6 @@ func ping8x8() int {
 		return -1
 	}
 	output := string(out)
-	// "time=17ms" or "time<1ms"
 	if idx := strings.LastIndex(output, "time="); idx >= 0 {
 		rest := output[idx+len("time="):]
 		if end := strings.IndexAny(rest, "ms \n"); end > 0 {
@@ -413,7 +412,6 @@ func getDiskHealth() (string, int) {
 	if runtime.GOOS != "windows" {
 		return "unknown", 0
 	}
-	// SMART health via wmic diskdrive
 	cmd := exec.Command("wmic", "diskdrive", "get", "Status", "/format:value")
 	out, err := cmd.Output()
 	if err != nil {
@@ -440,7 +438,6 @@ func getDiskHealth() (string, int) {
 }
 
 func getDiskTemperature() int {
-	// Try PowerShell first (NVMe can expose temperature)
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		`Get-PhysicalDisk | Where-Object {$_.OperationalStatus -eq 'OK'} | Select-Object -First 1 | ForEach-Object { 
 			$temp = Get-CimInstance -Namespace root/wmi -ClassName MSStorageDriver_ATAPISmartData | Where-Object {$_.InstanceName -like "*PHYSICALDRIVE*"} | Select-Object -ExpandProperty Temperature
@@ -504,13 +501,10 @@ func getLocationWindows() (float64, float64, int, string) {
 }
 
 func getLocationLinux() (float64, float64, int, string) {
-	// Try GeoClue via D-Bus or fallback to geoip
-	return getLocationWindows() // fallback for now
+	return getLocationWindows()
 }
 
-// HTTP client dengan timeout
-var httpClient = &http.Client{Timeout: 10 * time.Second}
-
+// HTTP client with timeout
 func httpGet(url string, timeout time.Duration) (string, error) {
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(url)
@@ -524,9 +518,3 @@ func httpGet(url string, timeout time.Duration) (string, error) {
 	}
 	return string(body), nil
 }
-
-// Helper untuk import
-import (
-	"io"
-	"net/http"
-)
