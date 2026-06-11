@@ -28,19 +28,14 @@ func main() {
 	}
 	*serverURL = strings.TrimRight(*serverURL, "/")
 
-	// Load persistent agent ID (empty on first run)
 	agentID := loadAgentID()
-
-	// Collect registration info, with optional hostname override
 	info := collector.CollectInfo(*apiKey, *hostname)
 
-	// Register with server (pass stored agent_id if known)
 	resp, err := client.RegisterAgent(*serverURL, info, agentID)
 	if err != nil {
 		log.Fatalf("registration failed: %v", err)
 	}
 
-	// Save the server-assigned agent_id for future restarts
 	if resp.AgentID != "" {
 		agentID = resp.AgentID
 		if err := saveAgentID(agentID); err != nil {
@@ -49,12 +44,12 @@ func main() {
 	}
 	fmt.Printf("Registered as agent %s (hostname: %s)\n", agentID, info.Hostname)
 
-	// Send the first heartbeat immediately
 	sendHeartbeat(agentID, *apiKey, *serverURL)
 
-	// Then send heartbeats at regular intervals
 	ticker := time.NewTicker(time.Duration(*interval) * time.Second)
 	defer ticker.Stop()
+
+	fmt.Printf("Sending heartbeat every %ds...\n", *interval)
 
 	for range ticker.C {
 		sendHeartbeat(agentID, *apiKey, *serverURL)
@@ -76,10 +71,11 @@ func sendHeartbeat(agentID, apiKey, serverURL string) {
 
 	if err := client.SendHeartbeat(serverURL, hb); err != nil {
 		log.Printf("heartbeat error: %v", err)
+	} else {
+		log.Printf("heartbeat sent (CPU: %.1f%%, RAM: %.1f%%, Disk: %.1f%%)",
+			metrics.CPUPercent, metrics.RAMPercent, metrics.StoragePercent)
 	}
 }
-
-// ---------- agent ID persistence ----------
 
 func idFilePath() string {
 	exe, err := os.Executable()
