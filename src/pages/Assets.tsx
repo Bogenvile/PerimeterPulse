@@ -36,6 +36,11 @@ function formatLastSeen(iso: string | null): string {
   return `${days}d ago`;
 }
 
+function getDiskWarning(status: string): string {
+  if (status === "warning" || status === "critical") return " ⚠";
+  return "";
+}
+
 const AssetsPage = () => {
   const { token, isAdmin } = useAuth();
   const navigate = useNavigate();
@@ -187,7 +192,7 @@ const AssetsPage = () => {
               <div className="space-y-3 text-xs">
                 <DetailRow icon={<Cpu className="h-3.5 w-3.5 text-gray-400" />} label="CPU" value={asset.cpu_model.split(" ").slice(-1)[0]} />
                 <DetailRow icon={<Wifi className="h-3.5 w-3.5 text-gray-400" />} label="WiFi" value={asset.wifi_ssid || "N/A"} />
-                <DetailRow icon={<Disc className="h-3.5 w-3.5 text-gray-400" />} label="Disk" value={`${asset.disk_type} ${asset.disk_health_status !== "ok" ? `⚠` : ""}`} />
+                <DetailRow icon={<Disc className="h-3.5 w-3.5 text-gray-400" />} label="Disk" value={`${asset.disk_type}${getDiskWarning(asset.disk_health_status)}`} />
                 <DetailRow icon={<MapPin className="h-3.5 w-3.5 text-gray-400" />} label="IP" value={asset.ip_addresses?.[0] || "N/A"} />
               </div>
 
