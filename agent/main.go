@@ -19,7 +19,8 @@ var (
 	serverURL  = flag.String("server", "http://localhost:8080", "Server URL")
 	apiKey     = flag.String("apikey", "", "API Key for authentication")
 	hostname   = flag.String("hostname", "", "Override hostname")
-	interval   = flag.Int("interval", 60, "Heartbeat interval in seconds")
+	// Ubah default interval menjadi 5 detik
+	interval   = flag.Int("interval", 5, "Heartbeat interval in seconds")
 )
 
 func main() {
@@ -91,10 +92,11 @@ func runHeartbeat(c *client.HTTPClient, agentID, key string) {
 }
 
 func pollCommands(c *client.HTTPClient, agentID, apiKey string) {
-	ticker := time.NewTicker(10 * time.Second)
+	// Ubah interval polling command menjadi 5 detik
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	log.Println("Command polling started (interval: 10s)")
+	log.Println("Command polling started (interval: 5s)")
 
 	for range ticker.C {
 		cmds, err := c.FetchPendingCommands(agentID, apiKey)
