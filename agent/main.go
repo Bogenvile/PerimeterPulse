@@ -20,41 +20,41 @@ func main() {
 		log.Fatal("API Key is required (--apikey)")
 	}
 
-	agentID := collector.GetAgentID(*hostname)
 	log.Printf("Starting PerimeterPulse Agent v1.2.0")
 	log.Printf("Connecting to: %s", *server)
-	log.Printf("Agent ID: %s", agentID)
 
-	// FIX: Pass agentID to the client constructor
-	c := client.NewClient(*server, *apiKey, agentID)
+	// Inisialisasi client tanpa ID (ID akan didapat saat register)
+	c := client.NewClient(*server, *apiKey)
 
-	// Initial Registration
+	// 1. Register ke Server untuk mendapatkan AgentID otomatis
 	hw := collector.GetHardwareInfo()
-	if err := c.Register(agentID, hw); err != nil {
+	if err := c.Register(hw); err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
-	log.Println("Registration successful")
+	log.Printf("Registration successful! Agent ID: %s", c.AgentID)
 
-	// Heartbeat Loop
+	// 2. Heartbeat Loop
 	for {
 		metrics := collector.GetMetrics()
 		wifiSSID, wifiSignal, _ := collector.GetWifiInfo()
 		location := collector.GetLocation()
 
 		payload := client.HeartbeatPayload{
-			AgentID: agentID,
-			APIKey:  *apiKey,
-			Metrics: metrics,
+			// AgentID dan APIKey otomatis diisi oleh fungsi SendHeartbeat
+			// berdasarkan data yang tersimpan di client (c)
+			Metrics:  metrics,
 			Location: location,
 			NetworkInfo: client.NetworkInfo{
 				WiFiSSID:         wifiSSID,
 				WiFiSignalDBM:    wifiSignal,
-				IPAddresses:      []string{},
+				IPAddresses:      []string{}, // Bisa ditambahkan logic ambil IP lokal jika perlu
 			},
 		}
 
 		if err := c.SendHeartbeat(payload); err != nil {
 			log.Printf("Heartbeat error: %v", err)
+		} else {
+			log.Printf("Heartbeat sent for %s", c.AgentID)
 		}
 
 		time.Sleep(time.Duration(*interval) * time.Second)

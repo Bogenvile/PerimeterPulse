@@ -11,15 +11,13 @@ import (
 type Client struct {
 	ServerURL string
 	APIKey    string
-	AgentID   string
+	AgentID   string // Akan diisi otomatis setelah registrasi
 }
 
-// NewClient now requires agentID
-func NewClient(serverURL, apiKey, agentID string) *Client {
+func NewClient(serverURL, apiKey string) *Client {
 	return &Client{
 		ServerURL: serverURL,
 		APIKey:    apiKey,
-		AgentID:   agentID,
 	}
 }
 
@@ -39,7 +37,8 @@ type NetworkInfo struct {
 	NetworkSpeedMbps int      `json:"network_speed_mbps"`
 }
 
-func (c *Client) Register(agentID string, hw interface{}) error {
+// Register mengirim data hardware dan menerima AgentID dari server
+func (c *Client) Register(hw interface{}) error {
 	payloadData, err := json.Marshal(hw)
 	if err != nil {
 		return fmt.Errorf("failed to marshal hardware info: %w", err)
@@ -50,6 +49,7 @@ func (c *Client) Register(agentID string, hw interface{}) error {
 		return fmt.Errorf("failed to unmarshal hardware info: %w", err)
 	}
 
+	// Pastikan api_key selalu ada di body
 	payload["api_key"] = c.APIKey
 	
 	finalPayload, err := json.Marshal(payload)
@@ -74,17 +74,28 @@ func (c *Client) Register(agentID string, hw interface{}) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("register failed: %s", string(body))
 	}
+
+	// Parsing response untuk mendapatkan agent_id otomatis
+	var res struct {
+		Ok      bool   `json:"ok"`
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(body, &res); err == nil && res.AgentID != "" {
+		c.AgentID = res.AgentID
+	} else {
+		// Fallback jika server tidak mengembalikan ID (seharusnya tidak terjadi)
+		return fmt.Errorf("server did not return agent_id")
+	}
+	
 	return nil
 }
 
 func (c *Client) SendHeartbeat(payload HeartbeatPayload) error {
-	// CRITICAL FIX: Ensure AgentID and APIKey are set from the client struct
-	if payload.AgentID == "" {
+	// Gunakan AgentID yang didapat dari hasil Register
+	if c.AgentID != "" {
 		payload.AgentID = c.AgentID
 	}
-	if payload.APIKey == "" {
-		payload.APIKey = c.APIKey
-	}
+	payload.APIKey = c.APIKey
 	
 	data, _ := json.Marshal(payload)
 	url := fmt.Sprintf("%s/api/agent/heartbeat", c.ServerURL)
