@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -40,15 +41,16 @@ func main() {
 	if *hostname != "" {
 		regPayload.Hostname = *hostname
 	}
-	agentID = regPayload.Hostname // will be updated after registration if needed
+	agentID = regPayload.Hostname
 
 	if err := httpClient.Register(regPayload); err != nil {
 		log.Printf("Registration warning: %v (will retry on next heartbeat)", err)
 	}
 	log.Println("Agent registered successfully")
 
-	// Start command polling goroutine
+	// Start background goroutines
 	go pollCommands(httpClient, agentID, *apiKey)
+	go checkForUpdates(httpClient, agentID, *apiKey)
 
 	// Main heartbeat loop
 	ticker := time.NewTicker(time.Duration(*interval) * time.Second)
@@ -67,62 +69,59 @@ func main() {
 	}
 }
 
-func runHeartbeat(client *client.HTTPClient, agentID, key string) {
+func runHeartbeat(c *client.HTTPClient, agentID, key string) {
 	metrics := collector.CollectMetrics()
 	network := collector.CollectNetwork()
 	location := collector.CollectLocation()
 
 	payload := map[string]any{
-		"agent_id":    agentID,
-		"api_key":     key,
-		"metrics":     metrics,
+		"agent_id":     agentID,
+		"api_key":      key,
+		"metrics":      metrics,
 		"network_info": network,
-		"location":    location,
+		"location":     location,
 	}
 
-	if err := client.Heartbeat(payload); err != nil {
+	if err := c.Heartbeat(payload); err != nil {
 		log.Printf("Heartbeat error: %v", err)
 		return
 	}
 	log.Println("Heartbeat sent successfully")
 }
 
-func pollCommands(client *client.HTTPClient, agentID, apiKey string) {
-	ticker := time.NewTicker(10 * time.Second) // Poll every 10 seconds
+func pollCommands(c *client.HTTPClient, agentID, apiKey string) {
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	log.Println("Command polling started (interval: 10s)")
 
 	for range ticker.C {
-		cmds, err := client.FetchPendingCommands(agentID, apiKey)
+		cmds, err := c.FetchPendingCommands(agentID, apiKey)
 		if err != nil {
 			log.Printf("Failed to fetch commands: %v", err)
 			continue
 		}
 
 		for _, cmd := range cmds {
-			go executeAndReport(client, agentID, apiKey, cmd)
+			go executeAndReport(c, agentID, apiKey, cmd)
 		}
 	}
 }
 
-func executeAndReport(client *client.HTTPClient, agentID, apiKey string, cmd client.PendingCommand) {
+func executeAndReport(c *client.HTTPClient, agentID, apiKey string, cmd client.PendingCommand) {
 	log.Printf("Executing command %d: %s", cmd.ID, cmd.Command)
 
-	// Notify server we're starting
 	startPayload := client.CommandStatusPayload{
 		AgentID: agentID,
 		APIKey:  apiKey,
 		Action:  "start",
 	}
-	if err := client.ReportCommandStatus(cmd.ID, agentID, apiKey, startPayload); err != nil {
+	if err := c.ReportCommandStatus(cmd.ID, agentID, apiKey, startPayload); err != nil {
 		log.Printf("Failed to report start for command %d: %v", cmd.ID, err)
 	}
 
-	// Execute the command
 	result := commands.Execute(cmd.ID, cmd.Command)
 
-	// Report completion
 	completePayload := client.CommandStatusPayload{
 		AgentID:  agentID,
 		APIKey:   apiKey,
@@ -132,10 +131,53 @@ func executeAndReport(client *client.HTTPClient, agentID, apiKey string, cmd cli
 		ExitCode: result.ExitCode,
 	}
 
-	if err := client.ReportCommandStatus(cmd.ID, agentID, apiKey, completePayload); err != nil {
+	if err := c.ReportCommandStatus(cmd.ID, agentID, apiKey, completePayload); err != nil {
 		log.Printf("Failed to report completion for command %d: %v", cmd.ID, err)
 		return
 	}
 
 	log.Printf("Command %d completed (exit code: %d, duration: %s)", cmd.ID, result.ExitCode, result.ExecTime)
+}
+
+func checkForUpdates(c *client.HTTPClient, agentID, apiKey string) {
+	ticker := time.NewTicker(1 * time.Hour) // Check every hour
+	defer ticker.Stop()
+
+	log.Println("Auto-update check started (interval: 1h)")
+
+	for range ticker.C {
+		newVersion, downloadURL, err := c.CheckForUpdate(agentID, apiKey, runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			log.Printf("Update check error: %v", err)
+			continue
+		}
+		if newVersion == "" {
+			continue
+		}
+
+		log.Printf("New version available: %s. Downloading from %s...", newVersion, downloadURL)
+		if err := c.DownloadAndReplace(downloadURL); err != nil {
+			log.Printf("Auto-update failed: %v", err)
+			continue
+		}
+
+		log.Println("Auto-update successful. Restarting agent...")
+		restartSelf()
+		return
+	}
+}
+
+func restartSelf() {
+	executable, err := os.Executable()
+	if err != nil {
+		log.Fatalf("Cannot determine executable path: %v", err)
+	}
+	cmd := exec.Command(executable, os.Args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Failed to restart: %v", err)
+	}
+	os.Exit(0)
 }
