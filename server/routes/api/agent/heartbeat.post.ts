@@ -27,7 +27,8 @@ export default defineHandler(async (event) => {
     const n = body.network_info || {};
     const l = body.location || {};
 
-    // 1. Sanitize Metrics object to ensure no 'undefined' values reach the DB
+    // 1. Sanitize Metrics object to ensure no 'undefined' or 'null' for strict DB columns
+    // Defaulting to 0 for numeric values to avoid "cannot be null" errors
     const safeMetrics = {
       cpu_percent: m.cpu_percent ?? 0,
       ram_percent: m.ram_percent ?? 0,
@@ -39,15 +40,15 @@ export default defineHandler(async (event) => {
       uptime_seconds: m.uptime_seconds ?? 0,
       network_status: m.network_status || "unknown",
       network_latency_ms: m.network_latency_ms ?? 0,
-      ping_latency_ms: m.ping_latency_ms ?? null,
-      error_count: m.error_count ?? 0,
+      ping_latency_ms: m.ping_latency_ms ?? 0, // Force 0 instead of null
+      error_count: m.error_count ?? 0, // Force 0 instead of null
       // Booleans
       gateway_reachable: m.gateway_reachable != null ? !!m.gateway_reachable : null,
       dns_working: m.dns_working != null ? !!m.dns_working : null,
       internet_reachable: m.internet_reachable != null ? !!m.internet_reachable : null,
       default_gateway: m.default_gateway || null,
       disk_health_status: m.disk_health_status || "unknown",
-      disk_temperature_c: m.disk_temperature_c != null ? Number(m.disk_temperature_c) : null,
+      disk_temperature_c: m.disk_temperature_c != null ? Number(m.disk_temperature_c) : 0, // Force 0 instead of null
       timestamp: m.timestamp || new Date().toISOString(),
     };
 
@@ -106,13 +107,14 @@ export default defineHandler(async (event) => {
          WHERE agent_id=?`,
         [
           status,
-          safeMetrics.latitude ?? l.latitude, safeMetrics.longitude ?? l.longitude, // Using sanitized values if available
+          l.latitude ?? 0, l.longitude ?? 0, // Use l.latitude directly
           l.city || null, l.country || null,
           safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
           wifiSsid, wifiSignal,
           wifiIp, gatewayIp,
           netSpeed,
-          safeMetrics.ping_latency_ms, safeMetrics.error_count,
+          m.ping_latency_ms ?? 0, // Ensure 0
+          m.error_count ?? 0, // Ensure 0
           ipAddr,
           body.agent_id,
         ],
