@@ -76,15 +76,19 @@ type NetworkInfoData struct {
 
 // ──── Public API ────
 
-// CollectInfo — agent uses this to register with the server
-func CollectInfo(apiKey string) RegistrationInfo {
-	return collectInfo(apiKey)
+// CollectInfo — agent uses this to register with the server.
+// customHostname overrides os.Hostname() when set (via --hostname flag).
+func CollectInfo(apiKey string, customHostname string) RegistrationInfo {
+	return collectInfo(apiKey, customHostname)
 }
 
 // ──── Internal ────
 
-func collectInfo(apiKey string) RegistrationInfo {
+func collectInfo(apiKey string, customHostname string) RegistrationInfo {
 	hn, _ := os.Hostname()
+	if customHostname != "" {
+		hn = customHostname
+	}
 	osName, osVer := detectOS()
 
 	totalRAM := getTotalRAM()
