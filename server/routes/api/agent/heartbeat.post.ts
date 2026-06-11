@@ -80,9 +80,9 @@ export default defineHandler(async (event) => {
           wifi_signal_dbm=COALESCE(?, wifi_signal_dbm),
           wifi_ip=COALESCE(NULLIF(?,''), wifi_ip),
           gateway_ip=COALESCE(NULLIF(?,''), gateway_ip),
-          network_speed_mbps=COALESCE(?, network_speed_mbps),
-          ping_latency_ms=COALESCE(?, ping_latency_ms),
-          error_count=COALESCE(?, error_count),
+          network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0)),
+          ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0)),
+          error_count=COALESCE(?, COALESCE(error_count, 0)),
           ip_addresses=COALESCE(?, ip_addresses)
          WHERE agent_id=?`,
         [
