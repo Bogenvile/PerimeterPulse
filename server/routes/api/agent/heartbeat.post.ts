@@ -49,56 +49,63 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: "Invalid API key" });
   }
 
-  // Write metrics, location & error logs to MySQL
-  if (body.metrics) {
-    await insertMetrics(body.agent_id, body.metrics);
-    if (body.metrics.error_logs && body.metrics.error_logs.length > 0) {
-      await insertErrorLogs(body.agent_id, body.metrics.error_logs);
+  try {
+    if (body.metrics) {
+      await insertMetrics(body.agent_id, body.metrics);
+      if (body.metrics.error_logs && body.metrics.error_logs.length > 0) {
+        await insertErrorLogs(body.agent_id, body.metrics.error_logs);
+      }
     }
-  }
-  if (body.location) await insertLocation(body.agent_id, body.location);
+    if (body.location) await insertLocation(body.agent_id, body.location);
 
-  // Update asset record
-  const asset = await queryOne<{ id: string }>(
-    `SELECT id FROM assets WHERE agent_id = ?`, [body.agent_id],
-  );
-
-  if (asset) {
-    const status = determineStatus(body.metrics);
-    const net = body.network_info;
-    const loc = body.location;
-
-    await query(
-      `UPDATE assets SET
-        status=?, last_seen_at=NOW(),
-        last_location_lat=COALESCE(?, last_location_lat),
-        last_location_lng=COALESCE(?, last_location_lng),
-        city=COALESCE(NULLIF(?,''), city),
-        country=COALESCE(NULLIF(?,''), country),
-        disk_health_status=COALESCE(?, disk_health_status),
-        disk_temperature_c=COALESCE(?, disk_temperature_c),
-        wifi_ssid=COALESCE(NULLIF(?,''), wifi_ssid),
-        wifi_signal_dbm=COALESCE(?, wifi_signal_dbm),
-        wifi_ip=COALESCE(NULLIF(?,''), wifi_ip),
-        gateway_ip=COALESCE(NULLIF(?,''), gateway_ip),
-        network_speed_mbps=COALESCE(?, network_speed_mbps),
-        ping_latency_ms=COALESCE(?, ping_latency_ms),
-        error_count=COALESCE(?, error_count),
-        ip_addresses=COALESCE(?, ip_addresses)
-       WHERE agent_id=?`,
-      [
-        status,
-        loc?.latitude ?? null, loc?.longitude ?? null,
-        loc?.city ?? null, loc?.country ?? null,
-        body.metrics?.disk_health_status ?? null, body.metrics?.disk_temperature_c ?? null,
-        net?.wifi_ssid ?? null, net?.wifi_signal_dbm ?? null,
-        net?.wifi_ip ?? null, net?.gateway_ip ?? null,
-        net?.network_speed_mbps ?? null,
-        body.metrics?.ping_latency_ms ?? null, body.metrics?.error_count ?? null,
-        net?.ip_addresses ? JSON.stringify(net.ip_addresses) : null,
-        body.agent_id,
-      ],
+    const asset = await queryOne<{ id: string }>(
+      `SELECT id FROM assets WHERE agent_id = ?`, [body.agent_id],
     );
+
+    if (asset) {
+      const status = determineStatus(body.metrics);
+      const net = body.network_info;
+      const loc = body.location;
+
+      await query(
+        `UPDATE assets SET
+          status=?, last_seen_at=NOW(),
+          last_location_lat=COALESCE(?, last_location_lat),
+          last_location_lng=COALESCE(?, last_location_lng),
+          city=COALESCE(NULLIF(?,''), city),
+          country=COALESCE(NULLIF(?,''), country),
+          disk_health_status=COALESCE(?, disk_health_status),
+          disk_temperature_c=COALESCE(?, disk_temperature_c),
+          wifi_ssid=COALESCE(NULLIF(?,''), wifi_ssid),
+          wifi_signal_dbm=COALESCE(?, wifi_signal_dbm),
+          wifi_ip=COALESCE(NULLIF(?,''), wifi_ip),
+          gateway_ip=COALESCE(NULLIF(?,''), gateway_ip),
+          network_speed_mbps=COALESCE(?, network_speed_mbps),
+          ping_latency_ms=COALESCE(?, ping_latency_ms),
+          error_count=COALESCE(?, error_count),
+          ip_addresses=COALESCE(?, ip_addresses)
+         WHERE agent_id=?`,
+        [
+          status,
+          loc?.latitude ?? null, loc?.longitude ?? null,
+          loc?.city ?? null, loc?.country ?? null,
+          body.metrics?.disk_health_status ?? null, body.metrics?.disk_temperature_c ?? null,
+          net?.wifi_ssid ?? null, net?.wifi_signal_dbm ?? null,
+          net?.wifi_ip ?? null, net?.gateway_ip ?? null,
+          net?.network_speed_mbps ?? null,
+          body.metrics?.ping_latency_ms ?? null, body.metrics?.error_count ?? null,
+          net?.ip_addresses ? JSON.stringify(net.ip_addresses) : null,
+          body.agent_id,
+        ],
+      );
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Heartbeat DB Error:", msg, err);
+    throw createError({
+      statusCode: 500,
+      statusMessage: "Database error: " + msg,
+    });
   }
 
   return { ok: true, server_time: new Date().toISOString() };
