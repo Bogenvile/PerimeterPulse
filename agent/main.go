@@ -66,9 +66,9 @@ func main() {
 }
 
 func runHeartbeat(c *client.Client) {
-	metrics := collector.CollectMetrics()   // dari collector.go (return 1 value: MetricsData)
-	location := collector.GetLocation()      // dari collector.go (return 1 value: LocationData)
-	network := collector.CollectNetwork()    // dari collector.go (return 1 value: NetworkInfoData)
+	metrics := collector.CollectMetrics()    // dari collector.go (1 return: MetricsData)
+	location := collector.CollectLocation()  // dari collector.go (1 return: LocationData)
+	network := collector.CollectNetwork()    // dari collector.go (1 return: NetworkInfoData)
 
 	payload := client.HeartbeatPayload{
 		AgentID:     c.AgentID,
