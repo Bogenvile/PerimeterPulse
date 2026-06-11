@@ -5,104 +5,119 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"runtime"
 	"time"
-
-	"agent/collector"
 )
 
-type Client struct {
-	serverURL string
-	apiKey    string
-	hostname  string
-	agentID   string
-	http      *http.Client
+const (
+	registerPath    = "/api/agent/register"
+	heartbeatPath   = "/api/agent/heartbeat"
+	commandsPath    = "/api/agent/commands"
+)
+
+// HTTPClient adalah client yang digunakan untuk berkomunikasi dengan server.
+type HTTPClient struct {
+	BaseURL  string
+	HTTP     *http.Client
 }
 
-func New(serverURL, apiKey, hostname string) *Client {
-	return &Client{
-		serverURL: serverURL,
-		apiKey:    apiKey,
-		hostname:  hostname,
-		http: &http.Client{
-			Timeout: 15 * time.Second,
+// NewHTTPClient membuat HTTPClient baru dengan timeout default.
+func NewHTTPClient(baseURL string) *HTTPClient {
+	return &HTTPClient{
+		BaseURL: baseURL,
+		HTTP: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 10 * time.Second,
+			},
 		},
 	}
 }
 
-func (c *Client) Register() error {
-	info := collector.CollectInfo(c.apiKey)
-
-	body, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("marshal register payload: %w", err)
+func (c *HTTPClient) do(method, path string, body any, out any) error {
+	var reqBody io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(data)
 	}
 
-	resp, err := c.http.Post(c.serverURL+"/api/agent/register", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(method, c.BaseURL+path, reqBody)
 	if err != nil {
-		return fmt.Errorf("register request: %w", err)
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("register failed (status %d): %s", resp.StatusCode, string(respBody))
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
 	}
 
-	var result struct {
-		OK      bool   `json:"ok"`
-		AgentID string `json:"agent_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("Register decode warning: %v", err)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("server error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	if result.AgentID != "" {
-		c.agentID = result.AgentID
-	} else {
-		c.agentID = c.hostname + "-" + runtime.GOOS
+	if out != nil {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 	}
-
-	log.Printf("Registered, agent_id: %s", c.agentID)
 	return nil
 }
 
-func (c *Client) Heartbeat(metrics *collector.Metrics, location *collector.Location, network *collector.NetworkInfo) error {
-	if c.agentID == "" {
-		return fmt.Errorf("not registered yet")
-	}
+// Register mengirim payload registrasi ke server.
+func (c *HTTPClient) Register(payload any) error {
+	return c.do(http.MethodPost, registerPath, payload, nil)
+}
 
-	payload := struct {
-		AgentID     string                `json:"agent_id"`
-		APIKey      string                `json:"api_key"`
-		Metrics     *collector.Metrics    `json:"metrics,omitempty"`
-		Location    *collector.Location   `json:"location,omitempty"`
-		NetworkInfo *collector.NetworkInfo `json:"network_info,omitempty"`
-	}{
-		AgentID:     c.agentID,
-		APIKey:      c.apiKey,
-		Metrics:     metrics,
-		Location:    location,
-		NetworkInfo: network,
-	}
+// Heartbeat mengirim payload heartbeat ke server.
+func (c *HTTPClient) Heartbeat(payload any) error {
+	return c.do(http.MethodPost, heartbeatPath, payload, nil)
+}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal heartbeat: %w", err)
-	}
+// PendingCommand mewakili perintah yang menunggu eksekusi.
+type PendingCommand struct {
+	ID         int    `json:"id"`
+	Command    string `json:"command"`
+	CreatedAt  string `json:"created_at"`
+}
 
-	resp, err := c.http.Post(c.serverURL+"/api/agent/heartbeat", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("heartbeat request: %w", err)
-	}
-	defer resp.Body.Close()
+// CommandsResponse adalah respons dari server untuk daftar perintah pending.
+type CommandsResponse struct {
+	Commands []PendingCommand `json:"commands"`
+}
 
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("heartbeat failed (status %d): %s", resp.StatusCode, string(respBody))
+// FetchPendingCommands mengambil daftar perintah yang menunggu eksekusi.
+func (c *HTTPClient) FetchPendingCommands(agentID, apiKey string) ([]PendingCommand, error) {
+	path := fmt.Sprintf("%s?agent_id=%s&api_key=%s", commandsPath, agentID, apiKey)
+	var resp CommandsResponse
+	if err := c.do(http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
 	}
+	return resp.Commands, nil
+}
 
-	return nil
+// CommandStatusPayload adalah payload untuk memperbarui status perintah.
+type CommandStatusPayload struct {
+	AgentID  string `json:"agent_id"`
+	APIKey   string `json:"api_key"`
+	Action   string `json:"action"`
+	Output   string `json:"output,omitempty"`
+	Error    string `json:"error,omitempty"`
+	ExitCode int    `json:"exit_code,omitempty"`
+}
+
+// ReportCommandStatus mengirim hasil eksekusi perintah ke server.
+func (c *HTTPClient) ReportCommandStatus(commandID int, agentID, apiKey string, status CommandStatusPayload) error {
+	path := fmt.Sprintf("%s/%d?agent_id=%s&api_key=%s", commandsPath, commandID, agentID, apiKey)
+	return c.do(http.MethodPost, path, status, nil)
 }
