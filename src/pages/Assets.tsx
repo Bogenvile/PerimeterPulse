@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/skeleton-card";
-import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, Trash2, LayoutGrid, List, ArrowUpDown } from "lucide-react";
+import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, Trash2, LayoutGrid, List } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAssets, deleteAsset, setApiToken } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";

@@ -11,8 +11,6 @@ import {
   AlertCircle,
   ShieldCheck,
   Clock,
-  Eye,
-  EyeOff,
   X,
 } from "lucide-react";
 import type { ApiKeyInfo } from "@/lib/types";

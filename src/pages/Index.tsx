@@ -7,7 +7,7 @@ import { StatsCards } from "@/components/dashboard/StatsCards";
 import { SkeletonStatCard, SkeletonList } from "@/components/ui/skeleton-card";
 import {
   Loader2, AlertCircle, Monitor, MapPin, ChevronRight,
-  Radio, Zap, Activity, ArrowRight, TrendingUp, Shield,
+  Radio, Activity, ArrowRight, Shield,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAssets, setApiToken } from "@/lib/api";
