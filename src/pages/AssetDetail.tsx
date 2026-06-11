@@ -4,9 +4,10 @@ import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
+import { RemoteCommands } from "@/components/dashboard/RemoteCommands";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, Network,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X, Trash2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
@@ -50,6 +51,8 @@ const timeRangeOptions = [
   { label: "7d", value: "-7d" },
 ];
 
+type DetailTab = "overview" | "charts" | "commands";
+
 const AssetDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const { token, isAdmin } = useAuth();
@@ -60,6 +63,7 @@ const AssetDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timeRange, setTimeRange] = useState("-1h");
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
   const [loadingErrors, setLoadingErrors] = useState(false);
@@ -134,6 +138,14 @@ const AssetDetailPage = () => {
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
   const mapAsset = { ...asset, status: effectiveStatus };
 
+  const tabs: { key: DetailTab; label: string; adminOnly?: boolean }[] = [
+    { key: "overview", label: "Overview" },
+    { key: "charts", label: "Charts" },
+    { key: "commands", label: "Commands", adminOnly: true },
+  ];
+
+  const visibleTabs = tabs.filter((t) => !t.adminOnly || isAdmin);
+
   return (
     <div className="animate-fade-in space-y-6 p-6 md:p-8">
       {/* Header */}
@@ -191,55 +203,86 @@ const AssetDetailPage = () => {
         <InfoCard icon={<Network className="h-4 w-4" />} label="Network" value={asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"} sub={`Ping: ${fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}`} />
       </div>
 
-      {/* Charts */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-1.5">
-          {timeRangeOptions.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setTimeRange(opt.value)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                timeRange === opt.value
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <ChartCard title="CPU Usage">
-            {metrics.length > 0 ? <MetricsChart data={metrics} metric="cpu_percent" height={200} /> : <EmptyChart />}
-          </ChartCard>
-          <ChartCard title="RAM Usage">
-            {metrics.length > 0 ? <MetricsChart data={metrics} metric="ram_percent" height={200} /> : <EmptyChart />}
-          </ChartCard>
-          <ChartCard title="Storage Usage">
-            {metrics.length > 0 ? <MetricsChart data={metrics} metric="storage_percent" height={200} /> : <EmptyChart />}
-          </ChartCard>
-          <ChartCard title="Ping Latency (8.8.8.8)">
-            {metrics.length > 0 ? <MetricsChart data={metrics} metric="ping_latency_ms" height={200} /> : <EmptyChart />}
-          </ChartCard>
-        </div>
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {visibleTabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`relative px-4 py-3 text-sm font-medium transition-colors ${
+              activeTab === tab.key
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+            {activeTab === tab.key && (
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] rounded-full bg-primary" />
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Location */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold text-foreground">Location</h3>
+      {/* Tab Content */}
+      {activeTab === "overview" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Location */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-semibold text-foreground">Location</h3>
+              </div>
+              {asset.city && <span className="text-xs text-muted-foreground">{asset.city}{asset.country ? `, ${asset.country}` : ""}</span>}
+            </div>
+            {asset.last_location_lat != null && asset.last_location_lng != null ? (
+              <MapView assets={[mapAsset]} center={[asset.last_location_lat, asset.last_location_lng]} zoom={13} className="h-[320px] rounded-none border-0" />
+            ) : (
+              <div className="flex items-center justify-center h-[320px] text-sm text-muted-foreground">No location data available</div>
+            )}
           </div>
-          {asset.city && <span className="text-xs text-muted-foreground">{asset.city}{asset.country ? `, ${asset.country}` : ""}</span>}
         </div>
-        {asset.last_location_lat != null && asset.last_location_lng != null ? (
-          <MapView assets={[mapAsset]} center={[asset.last_location_lat, asset.last_location_lng]} zoom={13} className="h-[320px] rounded-none border-0" />
-        ) : (
-          <div className="flex items-center justify-center h-[320px] text-sm text-muted-foreground">No location data available</div>
-        )}
-      </div>
+      )}
+
+      {activeTab === "charts" && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center gap-1.5">
+            {timeRangeOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setTimeRange(opt.value)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  timeRange === opt.value
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ChartCard title="CPU Usage">
+              {metrics.length > 0 ? <MetricsChart data={metrics} metric="cpu_percent" height={200} /> : <EmptyChart />}
+            </ChartCard>
+            <ChartCard title="RAM Usage">
+              {metrics.length > 0 ? <MetricsChart data={metrics} metric="ram_percent" height={200} /> : <EmptyChart />}
+            </ChartCard>
+            <ChartCard title="Storage Usage">
+              {metrics.length > 0 ? <MetricsChart data={metrics} metric="storage_percent" height={200} /> : <EmptyChart />}
+            </ChartCard>
+            <ChartCard title="Ping Latency (8.8.8.8)">
+              {metrics.length > 0 ? <MetricsChart data={metrics} metric="ping_latency_ms" height={200} /> : <EmptyChart />}
+            </ChartCard>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "commands" && (
+        <div className="animate-fade-in">
+          <RemoteCommands assetId={asset.id} token={token} />
+        </div>
+      )}
 
       {/* Error Detail Modal */}
       {showErrorDetail && (
