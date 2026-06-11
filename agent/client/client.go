@@ -11,10 +11,10 @@ import (
 type Client struct {
 	ServerURL string
 	APIKey    string
-	AgentID   string // Akan diisi otomatis setelah registrasi
+	AgentID   string
 }
 
-func NewClient(serverURL, apiKey string) *Client {
+func NewClient(serverURL string, apiKey string) *Client {
 	return &Client{
 		ServerURL: serverURL,
 		APIKey:    apiKey,
@@ -27,14 +27,6 @@ type HeartbeatPayload struct {
 	Metrics     interface{} `json:"metrics"`
 	Location    interface{} `json:"location"`
 	NetworkInfo interface{} `json:"network_info"`
-}
-
-type NetworkInfo struct {
-	WiFiSSID         string   `json:"wifi_ssid"`
-	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
-	WiFiIP           string   `json:"wifi_ip"`
-	IPAddresses      []string `json:"ip_addresses"`
-	NetworkSpeedMbps int      `json:"network_speed_mbps"`
 }
 
 // Register mengirim data hardware dan menerima AgentID dari server
@@ -90,6 +82,7 @@ func (c *Client) Register(hw interface{}) error {
 	return nil
 }
 
+// SendHeartbeat mengirimkan heartbeat ke server
 func (c *Client) SendHeartbeat(payload HeartbeatPayload) error {
 	// Gunakan AgentID yang didapat dari hasil Register
 	if c.AgentID != "" {

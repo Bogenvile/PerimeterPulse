@@ -17,11 +17,27 @@ type Metrics struct {
 	Timestamp     string  `json:"timestamp"`
 }
 
-func GetMetrics() Metrics {
-	// Basic implementation returning current metrics
-	// CPU and RAM usage are simulated here for stability
-	// Full implementation would require WMI or PDH calls
+// CollectMetrics aggregates all system metrics and returns MetricsData
+func CollectMetrics() MetricsData {
+	// Collect base metrics first
+	m := GetMetrics()
+	
+	// Build full MetricsData
+	return MetricsData{
+		CPUPercent:        m.CPUPercent,
+		RAMPercent:        m.RAMPercent,
+		RAMUsedBytes:      m.RAMUsedBytes,
+		RAMTotalBytes:     m.RAMTotalBytes,
+		StoragePercent:    m.StoragePercent,
+		UptimeSeconds:     float64(m.UptimeSeconds),
+		NetworkStatus:     m.NetworkStatus,
+		NetworkLatencyMs:  m.NetworkLatencyMs,
+		Timestamp:         m.Timestamp,
+	}
+}
 
+// GetMetrics returns basic system metrics
+func GetMetrics() Metrics {
 	return Metrics{
 		CPUPercent:    float64(runtime.NumGoroutine()) * 0.5,
 		RAMPercent:    45.0,

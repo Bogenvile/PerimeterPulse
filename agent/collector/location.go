@@ -11,8 +11,20 @@ type Location struct {
 	Timestamp string  `json:"timestamp"`
 }
 
+// CollectLocation returns a LocationData by converting from the basic Location
+func CollectLocation() LocationData {
+	loc := GetLocation()
+	return LocationData{
+		Latitude:       loc.Latitude,
+		Longitude:      loc.Longitude,
+		AccuracyMeters: 5000, // default accuracy
+		Source:         loc.Source,
+		Timestamp:      loc.Timestamp,
+	}
+}
+
+// GetLocation returns placeholder location
 func GetLocation() Location {
-	// Placeholder location (Jakarta) until GeoIP is fully implemented
 	return Location{
 		Latitude:  -6.2088,
 		Longitude: 106.8456,
