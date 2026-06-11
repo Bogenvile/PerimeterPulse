@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
-import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, Trash2 } from "lucide-react";
+import { SkeletonCard, SkeletonTable } from "@/components/ui/skeleton-card";
+import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, Trash2, LayoutGrid, List, ArrowUpDown } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAssets, deleteAsset, setApiToken } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";
@@ -34,6 +35,15 @@ function getDiskWarning(status: string): string {
   return "";
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+type ViewMode = "grid" | "table";
+
 const AssetsPage = () => {
   const { token, isAdmin } = useAuth();
   const navigate = useNavigate();
@@ -43,6 +53,7 @@ const AssetsPage = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<AgentStatus | "all">("all");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   useEffect(() => {
     if (!token) return;
@@ -85,14 +96,6 @@ const AssetsPage = () => {
     });
   }, [search, statusFilter, assets]);
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
@@ -102,7 +105,7 @@ const AssetsPage = () => {
     );
   }
 
-  if (assets.length === 0) {
+  if (assets.length === 0 && !loading) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-8 gap-4">
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
@@ -128,15 +131,34 @@ const AssetsPage = () => {
             Manage and monitor all registered devices
           </p>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search assets..."
-            className="w-full sm:w-64 rounded-lg border border-input bg-card py-2 pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search assets..."
+              className="w-full sm:w-64 rounded-lg border border-input bg-card py-2 pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+          </div>
+          {/* View Toggle */}
+          <div className="flex border border-border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`flex h-9 w-9 items-center justify-center transition-colors ${viewMode === "grid" ? "bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground"}`}
+              title="Grid view"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("table")}
+              className={`flex h-9 w-9 items-center justify-center transition-colors border-l border-border ${viewMode === "table" ? "bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground"}`}
+              title="Table view"
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -160,69 +182,163 @@ const AssetsPage = () => {
         </span>
       </div>
 
-      {/* Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {filtered.map((asset) => {
-          const effectiveStatus = computeEffectiveStatus(asset);
-          return (
-            <div
-              key={asset.id}
-              className="rounded-xl border border-border bg-card p-5 transition-shadow hover:shadow-md"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{asset.os} {asset.os_version}</p>
-                </div>
-                <AgentStatusBadge status={effectiveStatus} size="sm" />
-              </div>
+      {/* Grid View */}
+      {viewMode === "grid" && (
+        loading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} lines={4} />)}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((asset) => {
+              const effectiveStatus = computeEffectiveStatus(asset);
+              return (
+                <div
+                  key={asset.id}
+                  className="group rounded-xl border border-border bg-card p-5 transition-all hover:shadow-md hover:border-border/80"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{asset.hostname}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{asset.os} {asset.os_version}</p>
+                    </div>
+                    <AgentStatusBadge status={effectiveStatus} size="sm" />
+                  </div>
 
-              <div className="space-y-2.5 text-xs">
-                <InfoRow icon={<Cpu className="h-3.5 w-3.5" />} label="CPU" value={asset.cpu_model.split(" ").slice(-1)[0]} />
-                <InfoRow icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={asset.wifi_ssid || "N/A"} />
-                <InfoRow icon={<Disc className="h-3.5 w-3.5" />} label="Disk" value={`${asset.disk_type}${getDiskWarning(asset.disk_health_status)}`} />
-                <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="IP" value={asset.ip_addresses?.[0] || "N/A"} />
-              </div>
+                  <div className="space-y-2.5 text-xs">
+                    <InfoRow icon={<Cpu className="h-3.5 w-3.5" />} label="CPU" value={asset.cpu_model.split(" ").slice(-1)[0]} />
+                    <InfoRow icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={asset.wifi_ssid || "N/A"} />
+                    <InfoRow icon={<Disc className="h-3.5 w-3.5" />} label="Disk" value={`${asset.disk_type}${getDiskWarning(asset.disk_health_status)}`} />
+                    <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="IP" value={asset.ip_addresses?.[0] || "N/A"} />
+                  </div>
 
-              <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">
-                  {formatLastSeen(asset.last_seen_at)}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => navigate(`/assets/${asset.id}`)}
-                    className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
-                  >
-                    View
-                    <ChevronRight className="h-3 w-3" />
-                  </button>
-                  {isAdmin && (
-                    <DeleteAssetDialog
-                      hostname={asset.hostname}
-                      onConfirm={() => handleDelete(asset)}
-                      trigger={
-                        <button
-                          disabled={deletingId === asset.id}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      }
-                    />
-                  )}
+                  <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground">
+                      {formatLastSeen(asset.last_seen_at)}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => navigate(`/assets/${asset.id}`)}
+                        className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
+                      >
+                        View
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                      {isAdmin && (
+                        <DeleteAssetDialog
+                          hostname={asset.hostname}
+                          onConfirm={() => handleDelete(asset)}
+                          trigger={
+                            <button
+                              disabled={deletingId === asset.id}
+                              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          }
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* Table View */}
+      {viewMode === "table" && (
+        loading ? (
+          <SkeletonTable rows={6} />
+        ) : (
+          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Host</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden lg:table-cell">OS</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden xl:table-cell">CPU</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden md:table-cell">Status</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden xl:table-cell">WiFi</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Last Seen</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filtered.map((asset) => {
+                    const effectiveStatus = computeEffectiveStatus(asset);
+                    return (
+                      <tr key={asset.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-bold text-foreground">
+                              {asset.hostname.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium text-foreground truncate max-w-[180px]">{asset.hostname}</p>
+                              <p className="text-xs text-muted-foreground font-mono truncate max-w-[140px]">{asset.ip_addresses?.[0] || "—"}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5 text-muted-foreground hidden lg:table-cell">
+                          <span className="text-xs">{asset.os} {asset.os_version}</span>
+                        </td>
+                        <td className="px-5 py-3.5 text-muted-foreground hidden xl:table-cell">
+                          <span className="text-xs truncate block max-w-[120px]" title={asset.cpu_model}>{asset.cpu_model.split(" ").slice(-2).join(" ")}</span>
+                        </td>
+                        <td className="px-5 py-3.5 hidden md:table-cell">
+                          <AgentStatusBadge status={effectiveStatus} size="sm" />
+                        </td>
+                        <td className="px-5 py-3.5 text-muted-foreground hidden xl:table-cell">
+                          <span className="text-xs truncate block max-w-[100px]">{asset.wifi_ssid || "—"}</span>
+                        </td>
+                        <td className="px-5 py-3.5 text-muted-foreground">
+                          <span className="text-xs">{formatLastSeen(asset.last_seen_at)}</span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => navigate(`/assets/${asset.id}`)}
+                              className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
+                            >
+                              View
+                              <ChevronRight className="h-3 w-3" />
+                            </button>
+                            {isAdmin && (
+                              <DeleteAssetDialog
+                                hostname={asset.hostname}
+                                onConfirm={() => handleDelete(asset)}
+                                trigger={
+                                  <button
+                                    disabled={deletingId === asset.id}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                }
+                              />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-      </div>
 
-      {filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <SlidersHorizontal className="mb-3 h-8 w-8 opacity-40" />
-          <p className="text-sm font-medium">No assets match your filters</p>
-        </div>
+            {filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <SlidersHorizontal className="mb-3 h-8 w-8 opacity-40" />
+                <p className="text-sm font-medium">No assets match your filters</p>
+              </div>
+            )}
+          </div>
+        )
       )}
     </div>
   );

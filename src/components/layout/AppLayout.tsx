@@ -72,17 +72,17 @@ function SidebarNavContent({
         title={collapsed ? label : undefined}
         onClick={() => onNavigate(to)}
         className={cn(
-          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all relative",
+          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all relative group",
           collapsed && "justify-center px-0",
           isActive
-            ? "bg-primary/[0.08] text-primary font-semibold"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            ? "bg-primary/[0.08] text-primary shadow-sm shadow-primary/5"
+            : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
         )}
       >
         {isActive && (
           <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-primary" />
         )}
-        <Icon className="h-[18px] w-[18px] flex-shrink-0" />
+        <Icon className={cn("h-[18px] w-[18px] flex-shrink-0", isActive && "drop-shadow-sm")} />
         {!collapsed && <span>{label}</span>}
       </NavLink>
     );
@@ -92,7 +92,7 @@ function SidebarNavContent({
     <>
       {/* Logo */}
       <div className={cn("flex items-center h-16 px-4 border-b border-border flex-shrink-0", collapsed ? "justify-center" : "gap-2.5")}>
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm shadow-primary/20">
           <Radio className="h-4 w-4 text-primary-foreground" />
         </div>
         {!collapsed && (
@@ -105,7 +105,7 @@ function SidebarNavContent({
       {/* Main Nav */}
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
         {!collapsed && (
-          <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+          <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
             Main
           </p>
         )}
@@ -116,7 +116,7 @@ function SidebarNavContent({
         {isAdmin && (
           <>
             {!collapsed && (
-              <p className="px-3 mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              <p className="px-3 mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 Admin
               </p>
             )}
@@ -127,7 +127,7 @@ function SidebarNavContent({
         )}
 
         {!collapsed && (
-          <p className="px-3 mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+          <p className="px-3 mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
             Settings
           </p>
         )}
@@ -142,7 +142,7 @@ function SidebarNavContent({
           <button
             onClick={() => onNavigate("/account")}
             className={cn(
-              "flex items-center gap-3 w-full rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-muted",
+              "flex items-center gap-3 w-full rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-muted/80",
               collapsed && "justify-center px-0"
             )}
           >
@@ -205,7 +205,6 @@ export function AppLayout() {
     />
   );
 
-  // Breadcrumb from path
   const breadcrumbs = location.pathname
     .split("/")
     .filter(Boolean)
@@ -220,7 +219,7 @@ export function AppLayout() {
       {/* Desktop Sidebar */}
       <aside
         className={cn(
-          "hidden md:flex md:flex-col border-r border-border bg-card transition-all duration-200 overflow-hidden flex-shrink-0",
+          "hidden md:flex md:flex-col border-r border-border bg-card transition-all duration-200 overflow-hidden flex-shrink-0 shadow-sm",
           collapsed ? "w-[70px]" : "w-[260px]"
         )}
       >
@@ -266,7 +265,7 @@ export function AppLayout() {
       {/* Main Content */}
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         {/* Header */}
-        <header className="flex h-16 items-center justify-between border-b border-border px-4 md:px-6 bg-card flex-shrink-0">
+        <header className="flex h-16 items-center justify-between border-b border-border px-4 md:px-6 bg-card/80 backdrop-blur-sm flex-shrink-0">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileOpen(true)}
@@ -285,7 +284,7 @@ export function AppLayout() {
               </button>
               {breadcrumbs.map((crumb) => (
                 <span key={crumb.path} className="flex items-center gap-1.5">
-                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
                   {crumb.isLast ? (
                     <span className="font-medium text-foreground">{crumb.label}</span>
                   ) : (

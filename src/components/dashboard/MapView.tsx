@@ -96,7 +96,6 @@ export function MapView({
     [onAssetClick],
   );
 
-  // Initialize map once
   useEffect(() => {
     if (!containerRef.current || initRef.current) return;
     initRef.current = true;
@@ -139,7 +138,6 @@ export function MapView({
     };
   }, []);
 
-  // Place markers whenever map is ready or assets change
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -173,15 +171,15 @@ export function MapView({
       }
 
       marker.bindPopup(
-        `<div style="font-family:system-ui,-apple-system,sans-serif;min-width:160px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        `<div style="font-family:Inter,system-ui,-apple-system,sans-serif;min-width:160px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;${asset.status === 'online' ? 'box-shadow:0 0 6px ' + color : ''}"></span>
             <strong style="font-size:13px;color:#1a1a2e">${asset.hostname}</strong>
           </div>
-          <div style="font-size:11px;color:#666;line-height:1.7">
-            ${asset.os}<br/>
-            ${asset.wifi_ssid || "No WiFi"} · <span style="color:${color}">${lastSeen}</span>
-            ${location ? `<br/>📍 ${location}` : ""}
+          <div style="font-size:11px;color:#666;line-height:1.8">
+            <div>${asset.os}</div>
+            <div>${asset.wifi_ssid || "No WiFi"} · <span style="color:${color};font-weight:500">${lastSeen}</span></div>
+            ${location ? `<div>📍 ${location}</div>` : ""}
           </div>
         </div>`,
         { maxWidth: 260 },

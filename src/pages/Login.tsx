@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { Radio, Lock, User, AlertCircle, Eye, EyeOff, Shield, Activity, Globe, Zap } from "lucide-react";
+import { Radio, Lock, User, AlertCircle, Eye, EyeOff, Shield, Activity, Globe } from "lucide-react";
 
 const LoginPage = () => {
   const { login, isAuthenticated } = useAuth();
