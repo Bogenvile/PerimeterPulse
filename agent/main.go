@@ -49,26 +49,33 @@ func main() {
 	}
 	fmt.Printf("Registered as agent %s (hostname: %s)\n", agentID, info.Hostname)
 
-	// Heartbeat loop
+	// Send the first heartbeat immediately
+	sendHeartbeat(agentID, *apiKey, *serverURL)
+
+	// Then send heartbeats at regular intervals
 	ticker := time.NewTicker(time.Duration(*interval) * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		metrics := collector.CollectMetrics()
-		location := collector.CollectLocation()
-		network := collector.CollectNetwork()
+		sendHeartbeat(agentID, *apiKey, *serverURL)
+	}
+}
 
-		hb := client.HeartbeatPayload{
-			AgentID:     agentID,
-			APIKey:      *apiKey,
-			Metrics:     metrics,
-			Location:    location,
-			NetworkInfo: network,
-		}
+func sendHeartbeat(agentID, apiKey, serverURL string) {
+	metrics := collector.CollectMetrics()
+	location := collector.CollectLocation()
+	network := collector.CollectNetwork()
 
-		if err := client.SendHeartbeat(*serverURL, hb); err != nil {
-			log.Printf("heartbeat error: %v", err)
-		}
+	hb := client.HeartbeatPayload{
+		AgentID:     agentID,
+		APIKey:      apiKey,
+		Metrics:     metrics,
+		Location:    location,
+		NetworkInfo: network,
+	}
+
+	if err := client.SendHeartbeat(serverURL, hb); err != nil {
+		log.Printf("heartbeat error: %v", err)
 	}
 }
 
