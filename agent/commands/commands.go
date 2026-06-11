@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
