@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	server := flag.String("server", "http://localhost:3000", "Server URL")
+	server := flag.String("server", "http://localhost:8080", "Server URL")
 	apiKey := flag.String("apikey", "", "API Key")
 	hostname := flag.String("hostname", "", "Hostname override")
 	interval := flag.Int("interval", 60, "Heartbeat interval in seconds")
@@ -37,8 +37,7 @@ func main() {
 	// Heartbeat Loop
 	for {
 		metrics := collector.GetMetrics()
-		wifiSSID, wifiSignal, wifiIP := collector.GetWifiInfo()
-		ips := collector.GetAllIPs()
+		wifiSSID, wifiSignal, _ := collector.GetWifiInfo()
 		location := collector.GetLocation()
 
 		payload := client.HeartbeatPayload{
@@ -49,9 +48,7 @@ func main() {
 			NetworkInfo: client.NetworkInfo{
 				WiFiSSID:         wifiSSID,
 				WiFiSignalDBM:    wifiSignal,
-				WiFiIP:           wifiIP,
-				IPAddresses:      ips,
-				NetworkSpeedMbps: 0,
+				IPAddresses:      []string{},
 			},
 		}
 

@@ -5,201 +5,99 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"os"
-	"runtime"
-	"time"
 )
 
-// HTTPClient - Client untuk komunikasi dengan server
-type HTTPClient struct {
-	BaseURL    string
-	HTTPClient *http.Client
+type Client struct {
+	ServerURL string
+	APIKey    string
+	AgentID   string
 }
 
-// PendingCommand - Command yang menunggu eksekusi
-type PendingCommand struct {
-	ID        int    `json:"id"`
-	Command   string `json:"command"`
-	CreatedAt string `json:"created_at"`
-}
-
-// CommandStatusPayload - Payload untuk update status command
-type CommandStatusPayload struct {
-	AgentID  string `json:"agent_id"`
-	APIKey   string `json:"api_key"`
-	Action   string `json:"action"`
-	Output   string `json:"output,omitempty"`
-	Error    string `json:"error,omitempty"`
-	ExitCode *int   `json:"exit_code,omitempty"`
-}
-
-// NewHTTPClient membuat client baru
-func NewHTTPClient(baseURL string) *HTTPClient {
-	return &HTTPClient{
-		BaseURL:    baseURL,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+func NewClient(serverURL, apiKey string) *Client {
+	return &Client{
+		ServerURL: serverURL,
+		APIKey:    apiKey,
 	}
 }
 
-// Register mendaftarkan agent ke server
-func (c *HTTPClient) Register(payload any) error {
-	url := fmt.Sprintf("%s/api/agent/register", c.BaseURL)
-	body, _ := json.Marshal(payload)
+type RegisterPayload struct {
+	Hostname         string   `json:"hostname"`
+	OS               string   `json:"os"`
+	OSVersion        string   `json:"os_version"`
+	AgentVersion     string   `json:"agent_version"`
+	APIKey           string   `json:"api_key"`
+	MacAddresses     []string `json:"mac_addresses"`
+	CPUModel         string   `json:"cpu_model"`
+	CPUCores         int      `json:"cpu_cores"`
+	RAMTotalBytes    uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64  `json:"storage_total_bytes"`
+	DiskModel        string   `json:"disk_model"`
+	DiskType         string   `json:"disk_type"`
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+}
 
-	resp, err := c.HTTPClient.Post(url, "application/json", bytes.NewBuffer(body))
+func (c *Client) Register(agentID string, hw interface{}) error {
+	// Type assertion atau mapping manual tergantung struktur hw
+	// Untuk simplifikasi, kita asumsikan hw adalah struct yang bisa di-marshal
+	payload, _ := json.Marshal(hw)
+	
+	// Kita perlu enrich payload dengan APIKey dan Hostname jika belum ada
+	// Tapi untuk sekarang, kita kirim raw payload hw yang harusnya sudah lengkap
+	// dari collector.GetHardwareInfo() yang sudah di-enrich
+	
+	url := fmt.Sprintf("%s/api/agent/register", c.ServerURL)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("register failed: %s", string(respBody))
-	}
-	return nil
-}
-
-// Heartbeat mengirim heartbeat ke server
-func (c *HTTPClient) Heartbeat(payload map[string]any) error {
-	url := fmt.Sprintf("%s/api/agent/heartbeat", c.BaseURL)
-	body, _ := json.Marshal(payload)
-
-	resp, err := c.HTTPClient.Post(url, "application/json", bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("heartbeat failed: %s", string(respBody))
-	}
-	return nil
-}
-
-// FetchPendingCommands mengambil command yang pending
-func (c *HTTPClient) FetchPendingCommands(agentID, apiKey string) ([]PendingCommand, error) {
-	url := fmt.Sprintf("%s/api/agent/commands?agent_id=%s&api_key=%s", c.BaseURL, agentID, apiKey)
-
-	resp, err := c.HTTPClient.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch commands failed: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Commands []PendingCommand `json:"commands"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-	return result.Commands, nil
-}
-
-// ReportCommandStatus melaporkan status command ke server
-func (c *HTTPClient) ReportCommandStatus(commandID int, agentID, apiKey string, payload CommandStatusPayload) error {
-	url := fmt.Sprintf("%s/api/agent/commands/%d", c.BaseURL, commandID)
-	body, _ := json.Marshal(payload)
-
-	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
+	
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
+	
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("report command status failed: %s", string(respBody))
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("register failed: %s", string(body))
 	}
 	return nil
 }
 
-// CheckForUpdate memeriksa update baru
-func (c *HTTPClient) CheckForUpdate(agentID, apiKey, os string) (string, string, error) {
-	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s",
-		c.BaseURL, agentID, apiKey, os)
-
-	resp, err := c.HTTPClient.Get(url)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("check update failed: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Version     string `json:"version"`
-		DownloadURL string `json:"download_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", err
-	}
-	return result.Version, result.DownloadURL, nil
+type HeartbeatPayload struct {
+	AgentID     string      `json:"agent_id"`
+	APIKey      string      `json:"api_key"`
+	Metrics     interface{} `json:"metrics"`
+	Location    interface{} `json:"location"`
+	NetworkInfo interface{} `json:"network_info"`
 }
 
-// DownloadAndReplace mendownload dan mengganti binary
-func (c *HTTPClient) DownloadAndReplace(downloadURL string) error {
-	resp, err := c.HTTPClient.Get(downloadURL)
+type NetworkInfo struct {
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	WiFiIP           string   `json:"wifi_ip"`
+	IPAddresses      []string `json:"ip_addresses"`
+	NetworkSpeedMbps int      `json:"network_speed_mbps"`
+}
+
+func (c *Client) SendHeartbeat(payload HeartbeatPayload) error {
+	payload.AgentID = c.AgentID
+	payload.APIKey = c.APIKey
+	
+	data, _ := json.Marshal(payload)
+	url := fmt.Sprintf("%s/api/agent/heartbeat", c.ServerURL)
+	
+	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
+	
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: %d", resp.StatusCode)
+		return fmt.Errorf("heartbeat failed with status: %d", resp.StatusCode)
 	}
-
-	// Create temp file
-	tempFile, err := os.CreateTemp("", "agent-update-*")
-	if err != nil {
-		return err
-	}
-	defer tempFile.Close()
-
-	// Download
-	if _, err := io.Copy(tempFile, resp.Body); err != nil {
-		os.Remove(tempFile.Name())
-		return err
-	}
-
-	// Get current executable path
-	execPath, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	// Backup current binary
-	backupPath := execPath + ".bak"
-	if err := os.Rename(execPath, backupPath); err != nil {
-		return fmt.Errorf("backup failed: %v", err)
-	}
-
-	// Replace with new binary
-	if err := os.Rename(tempFile.Name(), execPath); err != nil {
-		// Restore backup
-		os.Rename(backupPath, execPath)
-		return fmt.Errorf("replace failed: %v", err)
-	}
-
-	// Make executable (Unix only)
-	if runtime.GOOS != "windows" {
-		os.Chmod(execPath, 0755)
-	}
-
-	// Remove backup
-	os.Remove(backupPath)
-
-	log.Printf("Successfully updated agent to new version")
 	return nil
 }
