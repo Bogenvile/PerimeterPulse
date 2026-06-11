@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// ──── Types — must match dashboard ────
+// ──── Types (unchanged) ────
 
 type RegistrationInfo struct {
 	Hostname          string   `json:"hostname"`
@@ -76,8 +76,7 @@ type NetworkInfoData struct {
 
 // ──── Public API ────
 
-// CollectInfo — agent uses this to register with the server.
-// customHostname overrides os.Hostname() when set (via --hostname flag).
+// CollectInfo accepts an optional custom hostname (e.g., from --hostname flag)
 func CollectInfo(apiKey string, customHostname string) RegistrationInfo {
 	return collectInfo(apiKey, customHostname)
 }
@@ -122,8 +121,8 @@ func collectInfo(apiKey string, customHostname string) RegistrationInfo {
 	}
 }
 
-// CollectMetrics — runtime snapshot
 func CollectMetrics() MetricsData {
+	// ... (unchanged, same as before)
 	now := time.Now().UTC().Format(time.RFC3339)
 	totalRAM := getTotalRAM()
 	usedRAM := getUsedRAM()
@@ -176,7 +175,6 @@ func CollectMetrics() MetricsData {
 	}
 }
 
-// CollectLocation
 func CollectLocation() LocationData {
 	lat, lng, acc, src := getLocation()
 	return LocationData{
@@ -188,7 +186,6 @@ func CollectLocation() LocationData {
 	}
 }
 
-// CollectNetwork — WiFi + IP info
 func CollectNetwork() NetworkInfoData {
 	wifiInfo := GetWiFiInfo()
 	ipList := getLocalIPs()
@@ -208,8 +205,70 @@ func CollectNetwork() NetworkInfoData {
 	}
 }
 
-// ──── Helpers ────
+// ──── Location: use Windows Location API (OS-level) ────
 
+func getLocation() (float64, float64, int, string) {
+	if runtime.GOOS == "windows" {
+		return getLocationWindowsAccurate()
+	}
+	return getLocationWindows()  // fallback to geoip for Linux
+}
+
+// getLocationWindowsAccurate uses Windows.Devices.Geolocation (Wi‑Fi triangulation)
+func getLocationWindowsAccurate() (float64, float64, int, string) {
+	script := `
+Add-Type -AssemblyName System.Device
+$watcher = New-Object System.Device.Location.GeoCoordinateWatcher
+$watcher.TryStart($false, [System.TimeSpan]::FromSeconds(5))
+$coord = $watcher.Position.Location
+if ($coord.IsUnknown) {
+    Write-Output "0,0,0,os_failed"
+} else {
+    Write-Output "$($coord.Latitude),$($coord.Longitude),$([Math]::Round($coord.HorizontalAccuracy)),os"
+}
+`
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
+	out, err := cmd.Output()
+	if err != nil {
+		// fallback to geoip
+		return getLocationWindows()
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(out)), ",")
+	if len(parts) != 4 {
+		return 0, 0, 99999, "os_failed"
+	}
+	lat, _ := strconv.ParseFloat(parts[0], 64)
+	lng, _ := strconv.ParseFloat(parts[1], 64)
+	acc, _ := strconv.Atoi(parts[2])
+	src := parts[3]
+	if lat == 0 && lng == 0 {
+		return getLocationWindows() // fallback
+	}
+	return lat, lng, acc, src
+}
+
+// old geoip fallback
+func getLocationWindows() (float64, float64, int, string) {
+	type geoResp struct {
+		Lat float64 `json:"lat"`
+		Lon float64 `json:"lon"`
+	}
+
+	resp, err := httpGet("https://ipapi.co/json/", 5*time.Second)
+	if err != nil {
+		return 0, 0, 99999, "geoip_failed"
+	}
+
+	var geo geoResp
+	if err := json.Unmarshal([]byte(resp), &geo); err != nil {
+		return 0, 0, 99999, "geoip_failed"
+	}
+
+	return geo.Lat, geo.Lon, 5000, "geoip"
+}
+
+// ... (rest of helpers unchanged)
 func detectOS() (string, string) {
 	switch runtime.GOOS {
 	case "windows":
@@ -476,36 +535,6 @@ func isInternetReachable() bool {
 	cmd := exec.Command("ping", "-n", "1", "-w", "2000", "8.8.8.8")
 	err := cmd.Run()
 	return err == nil
-}
-
-func getLocation() (float64, float64, int, string) {
-	if runtime.GOOS == "windows" {
-		return getLocationWindows()
-	}
-	return getLocationLinux()
-}
-
-func getLocationWindows() (float64, float64, int, string) {
-	type geoResp struct {
-		Lat float64 `json:"lat"`
-		Lon float64 `json:"lon"`
-	}
-
-	resp, err := httpGet("https://ipapi.co/json/", 5*time.Second)
-	if err != nil {
-		return 0, 0, 99999, "geoip_failed"
-	}
-
-	var geo geoResp
-	if err := json.Unmarshal([]byte(resp), &geo); err != nil {
-		return 0, 0, 99999, "geoip_failed"
-	}
-
-	return geo.Lat, geo.Lon, 5000, "geoip"
-}
-
-func getLocationLinux() (float64, float64, int, string) {
-	return getLocationWindows()
 }
 
 func httpGet(url string, timeout time.Duration) (string, error) {
