@@ -74,7 +74,14 @@ type NetworkInfoData struct {
 	IPAddresses      []string `json:"ip_addresses"`
 }
 
-// ──── CollectInfo — one-shot registration payload ────
+// ──── Public API ────
+
+// CollectInfo — agent uses this to register with the server
+func CollectInfo(apiKey string) RegistrationInfo {
+	return collectInfo(apiKey)
+}
+
+// ──── Internal ────
 
 func collectInfo(apiKey string) RegistrationInfo {
 	hn, _ := os.Hostname()
@@ -111,8 +118,7 @@ func collectInfo(apiKey string) RegistrationInfo {
 	}
 }
 
-// ──── CollectMetrics — runtime snapshot ────
-
+// CollectMetrics — runtime snapshot
 func CollectMetrics() MetricsData {
 	now := time.Now().UTC().Format(time.RFC3339)
 	totalRAM := getTotalRAM()
@@ -166,8 +172,7 @@ func CollectMetrics() MetricsData {
 	}
 }
 
-// ──── CollectLocation ────
-
+// CollectLocation
 func CollectLocation() LocationData {
 	lat, lng, acc, src := getLocation()
 	return LocationData{
@@ -179,8 +184,7 @@ func CollectLocation() LocationData {
 	}
 }
 
-// ──── CollectNetwork — WiFi + IP info ────
-
+// CollectNetwork — WiFi + IP info
 func CollectNetwork() NetworkInfoData {
 	wifiInfo := GetWiFiInfo()
 	ipList := getLocalIPs()
