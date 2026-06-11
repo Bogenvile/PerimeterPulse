@@ -1,13 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card } from "@/components/ui/card";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import {
-  ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X,
+  ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, Network,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
@@ -27,23 +26,19 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-function isNoSignal(dbm: number | null): boolean {
-  return dbm === null || dbm === 0 || dbm === -999;
-}
-
 function wifiSignalLabel(dbm: number | null): { text: string; color: string } {
-  if (isNoSignal(dbm)) return { text: "No signal data", color: "text-muted-foreground" };
-  if (dbm! >= -50) return { text: "Excellent", color: "text-emerald-400" };
-  if (dbm! >= -65) return { text: "Good", color: "text-blue-400" };
-  if (dbm! >= -75) return { text: "Fair", color: "text-amber-400" };
-  return { text: "Weak", color: "text-red-400" };
+  if (dbm === null || dbm === 0 || dbm === -999) return { text: "No data", color: "text-muted-foreground" };
+  if (dbm >= -50) return { text: "Excellent", color: "text-emerald-600" };
+  if (dbm >= -65) return { text: "Good", color: "text-primary" };
+  if (dbm >= -75) return { text: "Fair", color: "text-amber-600" };
+  return { text: "Weak", color: "text-destructive" };
 }
 
 function getHealthColor(status?: string): string {
   switch (status) {
-    case "ok": return "text-emerald-400";
-    case "warning": return "text-amber-400";
-    case "critical": return "text-red-400";
+    case "ok": return "text-emerald-600";
+    case "warning": return "text-amber-600";
+    case "critical": return "text-destructive";
     default: return "text-muted-foreground";
   }
 }
@@ -75,23 +70,12 @@ const AssetDetailPage = () => {
     setApiToken(token);
     setLoading(true);
     setError("");
-
     Promise.all([
       getAsset(id).catch((e) => { throw new Error("Asset: " + e.message); }),
-      getAssetMetrics(id, timeRange).catch((e) => {
-        console.warn("Metrics fetch failed", e);
-        return [] as MetricsDataPoint[];
-      }),
-      getAssetLocations(id, "-24h").catch((e) => {
-        console.warn("Locations fetch failed", e);
-        return [] as LocationDataPoint[];
-      }),
+      getAssetMetrics(id, timeRange).catch(() => [] as MetricsDataPoint[]),
+      getAssetLocations(id, "-24h").catch(() => [] as LocationDataPoint[]),
     ])
-      .then(([a, m, l]) => {
-        setAsset(a);
-        setMetrics(m);
-        setLocations(l);
-      })
+      .then(([a, m, l]) => { setAsset(a); setMetrics(m); setLocations(l); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [token, id, timeRange]);
@@ -121,21 +105,15 @@ const AssetDetailPage = () => {
   }, [asset, navigate]);
 
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-        <AlertCircle className="h-10 w-10 text-red-400" />
-        <p className="text-sm text-red-400">{error}</p>
-        <button onClick={() => navigate("/assets")} className="text-sm text-blue-400 hover:text-blue-300">
-          ← Back to Assets
-        </button>
+        <AlertCircle className="h-10 w-10 text-destructive" />
+        <p className="text-sm font-medium text-destructive">{error}</p>
+        <button onClick={() => navigate("/assets")} className="text-sm text-primary hover:underline">← Back to Assets</button>
       </div>
     );
   }
@@ -144,48 +122,35 @@ const AssetDetailPage = () => {
     return (
       <div className="flex h-full flex-col items-center justify-center p-8">
         <Monitor className="mb-4 h-12 w-12 text-muted-foreground opacity-30" />
-        <p className="text-lg font-medium text-muted-foreground">Asset not found</p>
-        <button onClick={() => navigate("/assets")} className="mt-3 text-sm text-blue-400 hover:text-blue-300">
-          ← Back to Assets
-        </button>
+        <p className="text-lg font-bold text-foreground">Asset not found</p>
+        <button onClick={() => navigate("/assets")} className="mt-3 text-sm text-primary hover:underline">← Back to Assets</button>
       </div>
     );
   }
 
   const effectiveStatus = computeEffectiveStatus(asset);
   const signalInfo = wifiSignalLabel(asset.wifi_signal_dbm);
-  const hasSignal = !isNoSignal(asset.wifi_signal_dbm);
+  const hasSignal = asset.wifi_signal_dbm != null && asset.wifi_signal_dbm !== 0 && asset.wifi_signal_dbm !== -999;
   const latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
-  const errorHistory = metrics.filter((m) => Number(m.error_count) > 0);
-
-  const mapAsset = {
-    ...asset,
-    status: effectiveStatus,
-  };
+  const mapAsset = { ...asset, status: effectiveStatus };
 
   return (
-    <div className="animate-fade-in space-y-5 p-4 md:p-6">
+    <div className="animate-fade-in space-y-6 p-6 md:p-8">
       {/* Header */}
       <div className="flex items-start gap-3">
         <button
           onClick={() => navigate("/assets")}
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.06] hover:bg-white/[0.04] transition-colors mt-0.5"
+          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors mt-0.5"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-bold">{asset.hostname}</h1>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-xl font-bold text-foreground">{asset.hostname}</h1>
             <AgentStatusBadge status={effectiveStatus} />
-            {effectiveStatus !== asset.status && (
-              <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                last seen {asset.last_seen_at ? formatTimeAgo(asset.last_seen_at) : "never"}
-              </span>
-            )}
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {asset.os} {asset.os_version} • Agent v{asset.agent_version} •{" "}
-            <code className="text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">{asset.agent_id}</code>
+            {asset.os} {asset.os_version} · Agent v{asset.agent_version}
           </p>
           {asset.city && (
             <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
@@ -194,150 +159,49 @@ const AssetDetailPage = () => {
           )}
         </div>
         {isAdmin && (
-          <div className="flex-shrink-0">
-            <DeleteAssetDialog
-              hostname={asset.hostname}
-              onConfirm={handleDelete}
-              trigger={
-                <button
-                  disabled={deleting}
-                  className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 hover:border-red-500/30 transition-colors disabled:opacity-50"
-                >
-                  {deleting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Bug className="h-3.5 w-3.5" />
-                  )}
-                  Delete Asset
-                </button>
-              }
-            />
-          </div>
+          <DeleteAssetDialog
+            hostname={asset.hostname}
+            onConfirm={handleDelete}
+            trigger={
+              <button
+                disabled={deleting}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-destructive hover:border-destructive/30 hover:bg-destructive/5 transition-colors disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Delete
+              </button>
+            }
+          />
         )}
       </div>
 
-      {/* Row 1: Hardware */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Cpu className="h-4 w-4" /><span className="text-xs">CPU</span>
-          </div>
-          <p className="text-sm font-semibold truncate" title={asset.cpu_model}>{asset.cpu_model}</p>
-          <p className="text-xs text-muted-foreground">{asset.cpu_cores} cores</p>
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <HardDrive className="h-4 w-4" /><span className="text-xs">RAM</span>
-          </div>
-          <p className="text-sm font-semibold">{formatBytes(asset.ram_total_bytes)}</p>
-          {latest && <p className="text-xs text-muted-foreground">{fmt(latest.ram_percent).toFixed(1)}% used</p>}
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Disc className="h-4 w-4" /><span className="text-xs">Storage</span>
-          </div>
-          <p className="text-sm font-semibold">{formatBytes(asset.storage_total_bytes)}</p>
-          {latest && <p className="text-xs text-muted-foreground">{fmt(latest.storage_percent).toFixed(1)}% used</p>}
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Laptop className="h-4 w-4" /><span className="text-xs">MAC / IP</span>
-          </div>
-          <p className="text-xs font-mono font-semibold truncate">{asset.mac_addresses?.[0] || "N/A"}</p>
-          <p className="text-xs text-muted-foreground truncate">{asset.ip_addresses?.[0] || "N/A"}</p>
-        </Card>
+      {/* Hardware Info Cards */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        <InfoCard icon={<Cpu className="h-4 w-4" />} label="CPU" value={asset.cpu_model} sub={`${asset.cpu_cores} cores`} />
+        <InfoCard icon={<HardDrive className="h-4 w-4" />} label="RAM" value={formatBytes(asset.ram_total_bytes)} sub={latest ? `${fmt(latest.ram_percent).toFixed(1)}% used` : undefined} />
+        <InfoCard icon={<Disc className="h-4 w-4" />} label="Storage" value={formatBytes(asset.storage_total_bytes)} sub={latest ? `${fmt(latest.storage_percent).toFixed(1)}% used` : undefined} />
+        <InfoCard icon={<Laptop className="h-4 w-4" />} label="MAC / IP" value={asset.mac_addresses?.[0] || "N/A"} sub={asset.ip_addresses?.[0] || "N/A"} mono />
       </div>
 
-      {/* Row 2: Disk, Temp, WiFi, Speed */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Disc className="h-4 w-4" /><span className="text-xs">Disk</span>
-          </div>
-          <p className="text-sm font-semibold truncate" title={asset.disk_model}>{asset.disk_model || "Unknown"}</p>
-          <p className="text-xs">
-            {asset.disk_type || "unknown"} •{" "}
-            <span className={getHealthColor(asset.disk_health_status)}>
-              {asset.disk_health_status || "unknown"}
-            </span>
-          </p>
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Thermometer className="h-4 w-4" /><span className="text-xs">Temp</span>
-          </div>
-          <p className="text-sm font-semibold">
-            {asset.disk_temperature_c != null ? `${asset.disk_temperature_c}°C` : "N/A"}
-          </p>
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Wifi className="h-4 w-4" /><span className="text-xs">WiFi</span>
-          </div>
-          <p className="text-sm font-semibold truncate">{asset.wifi_ssid || "N/A"}</p>
-          <p className={`text-xs ${signalInfo.color}`}>
-            {hasSignal ? `${asset.wifi_signal_dbm} dBm (${signalInfo.text})` : signalInfo.text}
-          </p>
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <EthernetPort className="h-4 w-4" /><span className="text-xs">Link Speed</span>
-          </div>
-          <p className="text-sm font-semibold">
-            {asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"}
-          </p>
-        </Card>
+      {/* Network & Disk Info Cards */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        <InfoCard icon={<Disc className="h-4 w-4" />} label="Disk" value={asset.disk_model || "Unknown"} sub={`${asset.disk_type || "unknown"} · ${getHealthColor(asset.disk_health_status).includes("emerald") ? "OK" : asset.disk_health_status || "unknown"}`} />
+        <InfoCard icon={<Thermometer className="h-4 w-4" />} label="Temperature" value={asset.disk_temperature_c != null ? `${asset.disk_temperature_c}°C` : "N/A"} />
+        <InfoCard icon={<Wifi className="h-4 w-4" />} label="WiFi" value={asset.wifi_ssid || "N/A"} sub={hasSignal ? `${asset.wifi_signal_dbm} dBm · ${signalInfo.text}` : signalInfo.text} />
+        <InfoCard icon={<Network className="h-4 w-4" />} label="Network" value={asset.network_speed_mbps > 0 ? `${asset.network_speed_mbps} Mbps` : "N/A"} sub={`Ping: ${fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}`} />
       </div>
 
-      {/* Row 3: Network Info */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Wifi className="h-4 w-4" /><span className="text-xs">WiFi IP</span>
-          </div>
-          <p className="text-sm font-semibold font-mono">{asset.wifi_ip || "N/A"}</p>
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Network className="h-4 w-4" /><span className="text-xs">Gateway</span>
-          </div>
-          <p className="text-sm font-semibold font-mono">{asset.gateway_ip || "N/A"}</p>
-        </Card>
-        <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Network className="h-4 w-4" /><span className="text-xs">Ping 8.8.8.8</span>
-          </div>
-          <p className="text-sm font-semibold">
-            {fmt(asset.ping_latency_ms) > 0 ? `${fmt(asset.ping_latency_ms).toFixed(1)} ms` : "N/A"}
-          </p>
-        </Card>
-        <Card
-          className="border-white/[0.06] bg-white/[0.02] p-4 cursor-pointer hover:bg-white/[0.04] transition-colors"
-          onClick={() => errorHistory.length > 0 && setShowErrorDetail(true)}
-        >
-          <div className="flex items-center gap-2 text-muted-foreground mb-1">
-            <Bug className="h-4 w-4" /><span className="text-xs">Errors (1h)</span>
-          </div>
-          <p className={`text-sm font-semibold ${Number(asset.error_count) > 0 ? "text-red-400" : "text-emerald-400"}`}>
-            {asset.error_count ?? 0}
-          </p>
-          {errorHistory.length > 0 && (
-            <p className="text-[10px] text-muted-foreground mt-0.5">Click for details →</p>
-          )}
-        </Card>
-      </div>
-
-      {/* Time Range + Charts */}
-      <div className="space-y-5">
-        <div className="flex items-center gap-1.5 flex-wrap">
+      {/* Charts */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-1.5">
           {timeRangeOptions.map((opt) => (
             <button
               key={opt.value}
               onClick={() => setTimeRange(opt.value)}
-              className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 timeRange === opt.value
-                  ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
-                  : "border border-white/[0.06] text-muted-foreground hover:text-foreground"
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
             >
               {opt.label}
@@ -345,105 +209,65 @@ const AssetDetailPage = () => {
           ))}
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-2">
-          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-            <h3 className="mb-3 text-sm font-semibold">CPU Usage</h3>
-            {metrics.length > 0 ? (
-              <MetricsChart data={metrics} metric="cpu_percent" color="#60a5fa" height={200} />
-            ) : (
-              <EmptyChartPlaceholder />
-            )}
-          </Card>
-          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-            <h3 className="mb-3 text-sm font-semibold">RAM Usage</h3>
-            {metrics.length > 0 ? (
-              <MetricsChart data={metrics} metric="ram_percent" color="#a78bfa" height={200} />
-            ) : (
-              <EmptyChartPlaceholder />
-            )}
-          </Card>
-          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-            <h3 className="mb-3 text-sm font-semibold">Storage Usage</h3>
-            {metrics.length > 0 ? (
-              <MetricsChart data={metrics} metric="storage_percent" color="#fbbf24" height={200} />
-            ) : (
-              <EmptyChartPlaceholder />
-            )}
-          </Card>
-          <Card className="border-white/[0.06] bg-white/[0.02] p-4">
-            <h3 className="mb-3 text-sm font-semibold">Ping Latency (8.8.8.8)</h3>
-            {metrics.length > 0 ? (
-              <MetricsChart data={metrics} metric="ping_latency_ms" color="#34d399" height={200} />
-            ) : (
-              <EmptyChartPlaceholder />
-            )}
-          </Card>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ChartCard title="CPU Usage">
+            {metrics.length > 0 ? <MetricsChart data={metrics} metric="cpu_percent" height={200} /> : <EmptyChart />}
+          </ChartCard>
+          <ChartCard title="RAM Usage">
+            {metrics.length > 0 ? <MetricsChart data={metrics} metric="ram_percent" height={200} /> : <EmptyChart />}
+          </ChartCard>
+          <ChartCard title="Storage Usage">
+            {metrics.length > 0 ? <MetricsChart data={metrics} metric="storage_percent" height={200} /> : <EmptyChart />}
+          </ChartCard>
+          <ChartCard title="Ping Latency (8.8.8.8)">
+            {metrics.length > 0 ? <MetricsChart data={metrics} metric="ping_latency_ms" height={200} /> : <EmptyChart />}
+          </ChartCard>
         </div>
       </div>
 
       {/* Location */}
-      <Card className="overflow-hidden border-white/[0.06] bg-white/[0.02] p-0">
-        <div className="border-b border-white/[0.06] px-5 py-3 flex items-center gap-2">
-          <MapPin className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold">Location History</h3>
-          {asset.city && (
-            <span className="text-xs text-muted-foreground ml-auto">
-              {asset.city}{asset.country ? `, ${asset.country}` : ""}
-            </span>
-          )}
-        </div>
-        {typeof window !== "undefined" && asset.last_location_lat != null && asset.last_location_lng != null ? (
-          <MapView
-            assets={[mapAsset]}
-            center={[asset.last_location_lat, asset.last_location_lng]}
-            zoom={13}
-            className="h-[320px] rounded-none border-0"
-          />
-        ) : (
-          <div className="flex items-center justify-center h-[320px] text-muted-foreground text-sm">
-            No location data available
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold text-foreground">Location</h3>
           </div>
+          {asset.city && <span className="text-xs text-muted-foreground">{asset.city}{asset.country ? `, ${asset.country}` : ""}</span>}
+        </div>
+        {asset.last_location_lat != null && asset.last_location_lng != null ? (
+          <MapView assets={[mapAsset]} center={[asset.last_location_lat, asset.last_location_lng]} zoom={13} className="h-[320px] rounded-none border-0" />
+        ) : (
+          <div className="flex items-center justify-center h-[320px] text-sm text-muted-foreground">No location data available</div>
         )}
-      </Card>
+      </div>
 
-      {/* Error Detail Dialog */}
+      {/* Error Detail Modal */}
       {showErrorDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl border border-white/[0.06] bg-card rounded-2xl shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
-                <Bug className="h-4 w-4 text-red-400" />
-                <h3 className="text-sm font-semibold">System Error Logs (last 50)</h3>
+                <Bug className="h-4 w-4 text-destructive" />
+                <h3 className="text-sm font-semibold text-foreground">Error Logs (last 50)</h3>
               </div>
-              <button
-                onClick={() => setShowErrorDetail(false)}
-                className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors"
-              >
+              <button onClick={() => setShowErrorDetail(false)} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-muted transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="p-5 max-h-96 overflow-y-auto space-y-3">
+            <div className="p-5 max-h-96 overflow-y-auto space-y-2">
               {loadingErrors ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
-                </div>
+                <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
               ) : errorLogs.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">No error logs recorded</p>
               ) : (
                 errorLogs.map((log, idx) => (
-                  <div key={idx} className="rounded-lg border border-white/[0.04] bg-white/[0.01] p-3 text-sm space-y-1">
+                  <div key={idx} className="rounded-lg border border-border p-3 text-sm space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {new Date(log.time).toLocaleString()}
-                      </span>
-                      <span className="text-xs font-semibold text-red-400 bg-red-500/10 px-2 py-0.5 rounded">{log.level}</span>
+                      <span className="text-xs text-muted-foreground font-mono">{new Date(log.time).toLocaleString()}</span>
+                      <span className="text-[10px] font-semibold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">{log.level}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate" title={log.source}>
-                      Source: {log.source || "N/A"} {log.event_id ? `(Event ID: ${log.event_id})` : ""}
-                    </p>
-                    <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap break-words">
-                      {log.message || "No message"}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Source: {log.source || "N/A"}</p>
+                    <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap break-words">{log.message || "No message"}</p>
                   </div>
                 ))
               )}
@@ -455,21 +279,30 @@ const AssetDetailPage = () => {
   );
 };
 
-function EmptyChartPlaceholder() {
+function InfoCard({ icon, label, value, sub, mono }: { icon: React.ReactNode; label: string; value: string; sub?: string; mono?: boolean }) {
   return (
-    <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center gap-2 text-muted-foreground mb-2">
+        {icon}
+        <span className="text-xs font-medium">{label}</span>
+      </div>
+      <p className={`text-sm font-semibold truncate ${mono ? "font-mono" : ""}`} title={value}>{value}</p>
+      {sub && <p className="text-xs text-muted-foreground mt-0.5 truncate">{sub}</p>}
+    </div>
   );
 }
 
-function formatTimeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h3 className="text-sm font-semibold text-foreground mb-3">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function EmptyChart() {
+  return <p className="text-xs text-muted-foreground py-8 text-center">Waiting for agent heartbeat...</p>;
 }
 
 export default AssetDetailPage;

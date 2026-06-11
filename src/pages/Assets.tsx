@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAssets, deleteAsset, setApiToken } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";
+import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { showSuccess, showError } from "@/utils/toast";
 import type { ExtendedAsset, AgentStatus } from "@/lib/types";
 
@@ -16,13 +16,6 @@ const statusFilterOptions: { label: string; value: AgentStatus | "all" }[] = [
   { label: "Critical", value: "critical" },
   { label: "Offline", value: "offline" },
 ];
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
-}
 
 function formatLastSeen(iso: string | null): string {
   if (!iso) return "Never";
@@ -94,33 +87,30 @@ const AssetsPage = () => {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center p-8">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-blue-500/20 border-t-blue-500" />
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center p-8 gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50">
-          <AlertCircle className="h-6 w-6 text-red-500" />
-        </div>
-        <p className="text-base font-semibold text-red-600">Connection Failed</p>
-        <p className="text-sm text-gray-500 max-w-xs text-center">{error}</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+        <AlertCircle className="h-10 w-10 text-destructive" />
+        <p className="text-sm font-medium text-destructive">{error}</p>
       </div>
     );
   }
 
   if (assets.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center p-8 gap-6">
-        <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-50">
-          <Monitor className="h-10 w-10 text-blue-500" />
+      <div className="flex h-full flex-col items-center justify-center p-8 gap-4">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+          <Monitor className="h-8 w-8 text-muted-foreground" />
         </div>
         <div className="text-center">
-          <p className="text-xl font-bold text-gray-900">No Assets Registered</p>
-          <p className="mt-2 text-sm text-gray-500 max-w-sm">
+          <p className="text-lg font-bold text-foreground">No Assets Registered</p>
+          <p className="mt-1 text-sm text-muted-foreground max-w-sm">
             Deploy the agent on your PCs and they will register automatically.
           </p>
         </div>
@@ -131,44 +121,42 @@ const AssetsPage = () => {
   return (
     <div className="animate-fade-in p-6 md:p-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Assets</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl font-bold text-foreground">Assets</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Manage and monitor all registered devices
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search assets..."
-              className="w-full sm:w-64 rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-            />
-          </div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search assets..."
+            className="w-full sm:w-64 rounded-lg border border-input bg-card py-2 pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+          />
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
         {statusFilterOptions.map((opt) => (
           <button
             key={opt.value}
             onClick={() => setStatusFilter(opt.value)}
-            className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+            className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
               statusFilter === opt.value
-                ? "bg-gray-900 text-white shadow-sm"
-                : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                ? "bg-foreground text-background"
+                : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-foreground/20"
             }`}
           >
             {opt.label}
           </button>
         ))}
-        <span className="ml-auto flex items-center text-xs text-gray-400">
-          {filtered.length} of {assets.length} assets
+        <span className="ml-auto text-xs text-muted-foreground">
+          {filtered.length} of {assets.length}
         </span>
       </div>
 
@@ -179,31 +167,31 @@ const AssetsPage = () => {
           return (
             <div
               key={asset.id}
-              className="group relative rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:shadow-md hover:border-blue-200"
+              className="rounded-xl border border-border bg-card p-5 transition-shadow hover:shadow-md"
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-gray-900">{asset.hostname}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{asset.os} {asset.os_version}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{asset.os} {asset.os_version}</p>
                 </div>
-                <StatusIndicator status={effectiveStatus} />
+                <AgentStatusBadge status={effectiveStatus} size="sm" />
               </div>
 
-              <div className="space-y-3 text-xs">
-                <DetailRow icon={<Cpu className="h-3.5 w-3.5 text-gray-400" />} label="CPU" value={asset.cpu_model.split(" ").slice(-1)[0]} />
-                <DetailRow icon={<Wifi className="h-3.5 w-3.5 text-gray-400" />} label="WiFi" value={asset.wifi_ssid || "N/A"} />
-                <DetailRow icon={<Disc className="h-3.5 w-3.5 text-gray-400" />} label="Disk" value={`${asset.disk_type}${getDiskWarning(asset.disk_health_status)}`} />
-                <DetailRow icon={<MapPin className="h-3.5 w-3.5 text-gray-400" />} label="IP" value={asset.ip_addresses?.[0] || "N/A"} />
+              <div className="space-y-2.5 text-xs">
+                <InfoRow icon={<Cpu className="h-3.5 w-3.5" />} label="CPU" value={asset.cpu_model.split(" ").slice(-1)[0]} />
+                <InfoRow icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={asset.wifi_ssid || "N/A"} />
+                <InfoRow icon={<Disc className="h-3.5 w-3.5" />} label="Disk" value={`${asset.disk_type}${getDiskWarning(asset.disk_health_status)}`} />
+                <InfoRow icon={<MapPin className="h-3.5 w-3.5" />} label="IP" value={asset.ip_addresses?.[0] || "N/A"} />
               </div>
 
-              <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
-                <span className="text-[10px] font-medium text-gray-400">
-                  Last seen {formatLastSeen(asset.last_seen_at)}
+              <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">
+                  {formatLastSeen(asset.last_seen_at)}
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => navigate(`/assets/${asset.id}`)}
-                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
                   >
                     View
                     <ChevronRight className="h-3 w-3" />
@@ -215,8 +203,8 @@ const AssetsPage = () => {
                       trigger={
                         <button
                           disabled={deletingId === asset.id}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-                          title="Delete asset"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+                          title="Delete"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -231,7 +219,7 @@ const AssetsPage = () => {
       </div>
 
       {filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <SlidersHorizontal className="mb-3 h-8 w-8 opacity-40" />
           <p className="text-sm font-medium">No assets match your filters</p>
         </div>
@@ -240,28 +228,14 @@ const AssetsPage = () => {
   );
 };
 
-function StatusIndicator({ status }: { status: AgentStatus }) {
-  const styles: Record<AgentStatus, string> = {
-    online: "bg-emerald-50 text-emerald-600",
-    offline: "bg-gray-100 text-gray-500",
-    warning: "bg-amber-50 text-amber-600",
-    critical: "bg-red-50 text-red-600",
-  };
+function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${styles[status]}`}>
-      {status}
-    </span>
-  );
-}
-
-function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2 text-muted-foreground">
         {icon}
-        <span className="text-gray-500">{label}</span>
+        <span>{label}</span>
       </div>
-      <span className="font-medium text-gray-900 truncate ml-2 max-w-[100px]">{value}</span>
+      <span className="font-medium text-foreground truncate max-w-[100px]">{value}</span>
     </div>
   );
 }

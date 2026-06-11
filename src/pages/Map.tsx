@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card } from "@/components/ui/card";
 import { MapView } from "@/components/dashboard/MapView";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { Loader2, AlertCircle, MapPin } from "lucide-react";
@@ -31,27 +30,25 @@ const MapPage = () => {
   );
 
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <AlertCircle className="h-10 w-10 text-red-500" />
-        <p className="text-sm text-red-500">{error}</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+        <AlertCircle className="h-10 w-10 text-destructive" />
+        <p className="text-sm font-medium text-destructive">{error}</p>
       </div>
     );
   }
 
   if (assetsWithLocation.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4">
-        <MapPin className="h-16 w-16 text-muted-foreground opacity-20" />
-        <p className="text-lg font-medium text-muted-foreground">No location data available</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+          <MapPin className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <p className="text-lg font-bold text-foreground">No Location Data</p>
         <p className="text-sm text-muted-foreground max-w-md text-center">
           Agents will appear on the map once they start sending location data.
         </p>
@@ -72,35 +69,34 @@ const MapPage = () => {
         />
         {selectedAsset && (
           <div className="absolute bottom-4 left-4 right-4 z-[1000] md:left-auto md:right-4 md:w-80">
-            <Card className="border-border bg-card/95 p-4 backdrop-blur-md shadow-lg">
+            <div className="rounded-xl border border-border bg-card p-4 shadow-lg">
               <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-semibold text-foreground">{selectedAsset.hostname}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedAsset.os} • {selectedAsset.cpu_model}
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground text-sm">{selectedAsset.hostname}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selectedAsset.os} · {selectedAsset.cpu_model}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    WiFi: {selectedAsset.wifi_ssid || "N/A"} •{" "}
-                    {selectedAsset.ip_addresses?.[0] || "No IP"}
+                    WiFi: {selectedAsset.wifi_ssid || "N/A"} · {selectedAsset.ip_addresses?.[0] || "No IP"}
                   </p>
                 </div>
-                <AgentStatusBadge status={selectedAsset.status} size="md" />
+                <AgentStatusBadge status={selectedAsset.status} size="sm" />
               </div>
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => navigate(`/assets/${selectedAsset.id}`)}
-                  className="flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                  className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   View Details
                 </button>
                 <button
                   onClick={() => setSelectedAsset(null)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
                   Close
                 </button>
               </div>
-            </Card>
+            </div>
           </div>
         )}
       </div>

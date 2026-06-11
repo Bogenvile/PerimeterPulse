@@ -23,7 +23,7 @@ export function DeleteUserDialog({ username, onConfirm, trigger }: DeleteUserDia
       <AlertDialogTrigger asChild>
         {trigger || (
           <button
-            className="flex items-center justify-center h-7 w-7 rounded-lg border border-white/[0.06] text-muted-foreground hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/10 transition-colors"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-destructive hover:border-destructive/30 hover:bg-destructive/5 transition-colors"
             title="Delete user"
           >
             <Trash2 className="h-3 w-3" />
@@ -34,22 +34,17 @@ export function DeleteUserDialog({ username, onConfirm, trigger }: DeleteUserDia
         <AlertDialogHeader>
           <AlertDialogTitle>Delete User</AlertDialogTitle>
           <AlertDialogDescription className="text-sm leading-relaxed">
-            Are you sure you want to delete user{" "}
-            <span className="font-semibold text-foreground">{username}</span>?
-            They will lose access to the dashboard immediately.
-            This action cannot be undone.
+            Are you sure you want to delete <span className="font-semibold text-foreground">{username}</span>?
+            They will lose access immediately. This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:gap-0">
-          <AlertDialogCancel className="mt-0 sm:mt-0">Cancel</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            onClick={(e) => {
-              e.preventDefault();
-              onConfirm();
-            }}
-            className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 mt-0 sm:mt-0"
+            onClick={(e) => { e.preventDefault(); onConfirm(); }}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete User
+            Delete
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

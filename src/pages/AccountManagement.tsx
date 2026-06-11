@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { Card } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth";
 import { changePassword, getUsers, createUser, deleteUser, setApiToken, type UserInfo } from "@/lib/api";
 import { DeleteUserDialog } from "@/components/dashboard/DeleteUserDialog";
@@ -15,7 +14,6 @@ import {
   CalendarDays,
   UserPlus,
   Users,
-  Trash2,
 } from "lucide-react";
 
 const AccountManagementPage = () => {
@@ -28,7 +26,6 @@ const AccountManagementPage = () => {
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // User management (admin)
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -49,33 +46,18 @@ const AccountManagementPage = () => {
       .finally(() => setLoadingUsers(false));
   }, [token, isAdmin]);
 
-  useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
-
-    if (newPassword.length < 6) {
-      showError("New password must be at least 6 characters");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      showError("New passwords do not match");
-      return;
-    }
-    if (currentPassword === newPassword) {
-      showError("New password must be different from current password");
-      return;
-    }
-
+    if (newPassword.length < 6) { showError("New password must be at least 6 characters"); return; }
+    if (newPassword !== confirmPassword) { showError("Passwords do not match"); return; }
+    if (currentPassword === newPassword) { showError("New password must be different"); return; }
     setSubmitting(true);
     try {
       await changePassword(currentPassword, newPassword);
       showSuccess("Password changed successfully");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err) {
       showError(err instanceof Error ? err.message : "Failed to change password");
     } finally {
@@ -85,29 +67,13 @@ const AccountManagementPage = () => {
 
   async function handleCreateUser(e: React.FormEvent) {
     e.preventDefault();
-
-    if (newUsername.length < 3) {
-      showError("Username must be at least 3 characters");
-      return;
-    }
-    if (newUserPassword.length < 6) {
-      showError("Password must be at least 6 characters");
-      return;
-    }
-
+    if (newUsername.length < 3) { showError("Username must be at least 3 characters"); return; }
+    if (newUserPassword.length < 6) { showError("Password must be at least 6 characters"); return; }
     setCreatingUser(true);
     try {
-      await createUser({
-        username: newUsername,
-        display_name: newDisplayName || undefined,
-        password: newUserPassword,
-        role: newUserRole,
-      });
-      showSuccess(`User "${newUsername}" created successfully`);
-      setNewUsername("");
-      setNewDisplayName("");
-      setNewUserPassword("");
-      setNewUserRole("viewer");
+      await createUser({ username: newUsername, display_name: newDisplayName || undefined, password: newUserPassword, role: newUserRole });
+      showSuccess(`User "${newUsername}" created`);
+      setNewUsername(""); setNewDisplayName(""); setNewUserPassword(""); setNewUserRole("viewer");
       fetchUsers();
     } catch (err) {
       showError(err instanceof Error ? err.message : "Failed to create user");
@@ -132,389 +98,161 @@ const AccountManagementPage = () => {
   const passwordStrength = getPasswordStrength(newPassword);
 
   return (
-    <div className="animate-fade-in space-y-6 p-4 md:p-6 max-w-2xl mx-auto">
-      {/* Page Header */}
+    <div className="animate-fade-in space-y-6 p-6 md:p-8 max-w-3xl">
+      {/* Header */}
       <div>
-        <h1 className="text-xl font-bold text-foreground">Account Management</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage your profile and security settings
-        </p>
+        <h1 className="text-xl font-bold text-foreground">Account</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Manage your profile and security settings</p>
       </div>
 
-      {/* Profile Card */}
-      <Card className="border-white/[0.06] bg-white/[0.02] overflow-hidden">
-        <div className="border-b border-white/[0.06] px-5 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Profile Information</h2>
-        </div>
-        <div className="p-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600/15 ring-1 ring-blue-500/20">
-              <User className="h-6 w-6 text-blue-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-lg font-semibold text-foreground">
-                {user?.display_name || user?.username || "—"}
-              </p>
-              <p className="text-sm text-muted-foreground">@{user?.username || "—"}</p>
-            </div>
-            <div className="flex items-center gap-1.5 rounded-full bg-blue-600/10 border border-blue-500/20 px-3 py-1">
-              <Shield className="h-3 w-3 text-blue-400" />
-              <span className="text-xs font-medium text-blue-400 capitalize">
-                {user?.role || "user"}
-              </span>
-            </div>
+      {/* Profile */}
+      <Section icon={<User className="h-4 w-4" />} title="Profile Information">
+        <div className="flex items-center gap-4 mb-5">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+            <User className="h-6 w-6 text-primary" />
           </div>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <InfoRow
-              icon={<User className="h-3.5 w-3.5" />}
-              label="Username"
-              value={user?.username || "—"}
-            />
-            <InfoRow
-              icon={<Shield className="h-3.5 w-3.5" />}
-              label="Role"
-              value={user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "—"}
-            />
-            <InfoRow
-              icon={<CalendarDays className="h-3.5 w-3.5" />}
-              label="Created"
-              value={user?.created_at ? new Date(user.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : "—"}
-            />
-            <InfoRow
-              icon={<CalendarDays className="h-3.5 w-3.5" />}
-              label="Last Login"
-              value={user?.last_login_at ? new Date(user.last_login_at).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Never"}
-            />
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold text-foreground">{user?.display_name || user?.username || "—"}</p>
+            <p className="text-sm text-muted-foreground">@{user?.username || "—"}</p>
           </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+            <Shield className="h-3 w-3" />
+            {user?.role || "user"}
+          </span>
         </div>
-      </Card>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ProfileField icon={<User className="h-3.5 w-3.5" />} label="Username" value={user?.username || "—"} />
+          <ProfileField icon={<Shield className="h-3.5 w-3.5" />} label="Role" value={user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "—"} />
+          <ProfileField icon={<CalendarDays className="h-3.5 w-3.5" />} label="Created" value={user?.created_at ? new Date(user.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : "—"} />
+          <ProfileField icon={<CalendarDays className="h-3.5 w-3.5" />} label="Last Login" value={user?.last_login_at ? new Date(user.last_login_at).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Never"} />
+        </div>
+      </Section>
 
-      {/* Change Password Card */}
-      <Card className="border-white/[0.06] bg-white/[0.02] overflow-hidden">
-        <div className="border-b border-white/[0.06] px-5 py-3 flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-foreground">Change Password</h2>
-        </div>
-        <form onSubmit={handlePasswordSubmit} className="p-5 space-y-4">
+      {/* Change Password */}
+      <Section icon={<KeyRound className="h-4 w-4" />} title="Change Password">
+        <form onSubmit={handlePasswordSubmit} className="space-y-4">
+          <FormField label="Current Password" showToggle={showCurrent} onToggle={() => setShowCurrent(!showCurrent)} type={showCurrent ? "text" : "password"} value={currentPassword} onChange={setCurrentPassword} placeholder="Enter current password" />
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              Current Password
-            </label>
-            <div className="relative">
-              <input
-                type={showCurrent ? "text" : "password"}
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Enter current password"
-                required
-                className="w-full rounded-lg border border-input bg-background py-2.5 pl-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
-              <button
-                type="button"
-                onClick={() => setShowCurrent(!showCurrent)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showCurrent ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              New Password
-            </label>
-            <div className="relative">
-              <input
-                type={showNew ? "text" : "password"}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Enter new password (min. 6 characters)"
-                required
-                minLength={6}
-                className="w-full rounded-lg border border-input bg-background py-2.5 pl-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
-              <button
-                type="button"
-                onClick={() => setShowNew(!showNew)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
+            <FormField label="New Password" showToggle={showNew} onToggle={() => setShowNew(!showNew)} type={showNew ? "text" : "password"} value={newPassword} onChange={setNewPassword} placeholder="Min. 6 characters" />
             {newPassword.length > 0 && (
               <div className="mt-2 space-y-1">
                 <div className="flex gap-1">
                   {[1, 2, 3, 4].map((level) => (
-                    <div
-                      key={level}
-                      className={`h-1 flex-1 rounded-full transition-colors ${
-                        level <= passwordStrength.score
-                          ? passwordStrength.colors[level - 1]
-                          : "bg-white/[0.06]"
-                      }`}
-                    />
+                    <div key={level} className={`h-1 flex-1 rounded-full transition-colors ${level <= passwordStrength.score ? passwordStrength.colors[level - 1] : "bg-muted"}`} />
                   ))}
                 </div>
-                <p className={`text-[11px] font-medium ${passwordStrength.textColor}`}>
-                  {passwordStrength.label}
-                </p>
+                <p className={`text-[11px] font-medium ${passwordStrength.textColor}`}>{passwordStrength.label}</p>
               </div>
             )}
           </div>
-
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              Confirm New Password
-            </label>
-            <div className="relative">
-              <input
-                type={showConfirm ? "text" : "password"}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm new password"
-                required
-                minLength={6}
-                className="w-full rounded-lg border border-input bg-background py-2.5 pl-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
-              <button
-                type="button"
-                onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-            {confirmPassword.length > 0 && newPassword !== confirmPassword && (
-              <p className="mt-1.5 text-xs text-red-400">Passwords do not match</p>
-            )}
-            {confirmPassword.length > 0 && newPassword === confirmPassword && (
-              <p className="mt-1.5 text-xs text-emerald-400 flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                Passwords match
-              </p>
-            )}
-          </div>
-
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={submitting || !currentPassword || !newPassword || !confirmPassword}
-              className="w-full sm:w-auto rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-500/20 flex items-center justify-center gap-2"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Changing Password...
-                </>
+            <FormField label="Confirm New Password" showToggle={showConfirm} onToggle={() => setShowConfirm(!showConfirm)} type={showConfirm ? "text" : "password"} value={confirmPassword} onChange={setConfirmPassword} placeholder="Confirm new password" />
+            {confirmPassword.length > 0 && (
+              confirmPassword !== newPassword ? (
+                <p className="mt-1 text-xs text-destructive">Passwords do not match</p>
               ) : (
-                "Update Password"
-              )}
-            </button>
+                <p className="mt-1 text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Passwords match</p>
+              )
+            )}
           </div>
+          <button
+            type="submit"
+            disabled={submitting || !currentPassword || !newPassword || !confirmPassword}
+            className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+          >
+            {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Changing...</> : "Update Password"}
+          </button>
         </form>
-      </Card>
+      </Section>
 
       {/* Admin: User Management */}
       {isAdmin && (
         <>
-          {/* Add User Card */}
-          <Card className="border-white/[0.06] bg-white/[0.02] overflow-hidden">
-            <div className="border-b border-white/[0.06] px-5 py-3 flex items-center gap-2">
-              <UserPlus className="h-4 w-4 text-emerald-400" />
-              <h2 className="text-sm font-semibold text-foreground">Add New User</h2>
-            </div>
-            <form onSubmit={handleCreateUser} className="p-5 space-y-4">
+          <Section icon={<UserPlus className="h-4 w-4" />} title="Add New User">
+            <form onSubmit={handleCreateUser} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    Username *
-                  </label>
-                  <input
-                    type="text"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    placeholder="e.g. john.doe"
-                    required
-                    minLength={3}
-                    className="w-full rounded-lg border border-input bg-background py-2.5 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    Display Name
-                  </label>
-                  <input
-                    type="text"
-                    value={newDisplayName}
-                    onChange={(e) => setNewDisplayName(e.target.value)}
-                    placeholder="e.g. John Doe (optional)"
-                    className="w-full rounded-lg border border-input bg-background py-2.5 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  />
-                </div>
+                <FormInput label="Username *" value={newUsername} onChange={setNewUsername} placeholder="e.g. john.doe" />
+                <FormInput label="Display Name" value={newDisplayName} onChange={setNewDisplayName} placeholder="Optional" />
               </div>
-
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    Password *
-                  </label>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Password *</label>
                   <div className="relative">
-                    <input
-                      type={showNewUserPwd ? "text" : "password"}
-                      value={newUserPassword}
-                      onChange={(e) => setNewUserPassword(e.target.value)}
-                      placeholder="Min. 6 characters"
-                      required
-                      minLength={6}
-                      className="w-full rounded-lg border border-input bg-background py-2.5 pl-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewUserPwd(!showNewUserPwd)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {showNewUserPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+                    <input type={showNewUserPwd ? "text" : "password"} value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="Min. 6 characters" required minLength={6} className="w-full rounded-lg border border-input bg-card py-2.5 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all" />
+                    <button type="button" onClick={() => setShowNewUserPwd(!showNewUserPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><Eye className="h-4 w-4" /></button>
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    Role *
-                  </label>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Role *</label>
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setNewUserRole("viewer")}
-                      className={`flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-                        newUserRole === "viewer"
-                          ? "border-blue-500/30 bg-blue-600/15 text-blue-400"
-                          : "border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Viewer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewUserRole("admin")}
-                      className={`flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-                        newUserRole === "admin"
-                          ? "border-blue-500/30 bg-blue-600/15 text-blue-400"
-                          : "border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Admin
-                    </button>
+                    {(["viewer", "admin"] as const).map((role) => (
+                      <button key={role} type="button" onClick={() => setNewUserRole(role)} className={`flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors capitalize ${newUserRole === role ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>{role}</button>
+                    ))}
                   </div>
                 </div>
               </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={creatingUser || !newUsername || !newUserPassword}
-                  className="w-full sm:w-auto rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-emerald-500/20 flex items-center justify-center gap-2"
-                >
-                  {creatingUser ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Creating User...
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="h-4 w-4" />
-                      Create User
-                    </>
-                  )}
-                </button>
-              </div>
+              <button type="submit" disabled={creatingUser || !newUsername || !newUserPassword} className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2">
+                {creatingUser ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</> : <><UserPlus className="h-4 w-4" /> Create User</>}
+              </button>
             </form>
-          </Card>
+          </Section>
 
-          {/* User List Card */}
-          <Card className="border-white/[0.06] bg-white/[0.02] overflow-hidden">
-            <div className="border-b border-white/[0.06] px-5 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-violet-400" />
-                <h2 className="text-sm font-semibold text-foreground">All Users</h2>
-                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {users.length}
-                </span>
-              </div>
-            </div>
-            <div className="divide-y divide-white/[0.04]">
+          <Section icon={<Users className="h-4 w-4" />} title={`All Users (${users.length})`}>
+            <div className="divide-y divide-border -mx-5">
               {loadingUsers ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
-                </div>
+                <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
               ) : users.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">No users found</p>
               ) : (
                 users.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center gap-3 px-5 py-3 group hover:bg-white/[0.02] transition-colors"
-                  >
-                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/[0.04] ring-1 ring-white/[0.06] text-sm font-bold text-muted-foreground">
-                      {u.username.charAt(0).toUpperCase()}
-                    </div>
+                  <div key={u.id} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-bold text-foreground">{u.username.charAt(0).toUpperCase()}</div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {u.display_name || u.username}
-                        </p>
-                        {u.id === user?.id && (
-                          <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
-                            You
-                          </span>
-                        )}
+                        <p className="truncate text-sm font-medium text-foreground">{u.display_name || u.username}</p>
+                        {u.id === user?.id && <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-medium">You</span>}
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        @{u.username} ·{" "}
-                        <span className="capitalize">{u.role}</span>
-                        {u.last_login_at && (
-                          <span> · Last login: {new Date(u.last_login_at).toLocaleDateString()}</span>
-                        )}
-                      </p>
+                      <p className="text-xs text-muted-foreground">@{u.username} · <span className="capitalize">{u.role}</span></p>
                     </div>
                     {u.id !== user?.id && (
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                        <DeleteUserDialog
-                          username={u.username}
-                          onConfirm={() => handleDeleteUser(u)}
-                        />
-                      </div>
+                      <DeleteUserDialog username={u.username} onConfirm={() => handleDeleteUser(u)} />
                     )}
                   </div>
                 ))
               )}
             </div>
-          </Card>
+          </Section>
+
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-xs font-semibold text-amber-800 mb-1">Security Notice</p>
+            <ul className="text-xs text-amber-700 space-y-0.5">
+              <li>• Use strong passwords with mixed characters</li>
+              <li>• Only create accounts for users who need access</li>
+              <li>• Change passwords periodically</li>
+            </ul>
+          </div>
         </>
       )}
-
-      {/* Security Notice */}
-      <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-        <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5">
-          Security Notice
-        </h3>
-        <ul className="text-xs text-muted-foreground space-y-1 leading-relaxed">
-          <li>• Use a strong password with a mix of letters, numbers, and symbols</li>
-          <li>• Never share your password with anyone</li>
-          <li>• Change your password periodically for better security</li>
-          {isAdmin && (
-            <li>• Only create accounts for users who need dashboard access</li>
-          )}
-        </ul>
-      </div>
     </div>
   );
 };
 
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl bg-white/[0.02] border border-white/[0.04] px-3 py-2.5">
-      <div className="text-muted-foreground">{icon}</div>
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-border px-5 py-3.5">
+        <span className="text-muted-foreground">{icon}</span>
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  );
+}
+
+function ProfileField({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+      <span className="text-muted-foreground">{icon}</span>
       <div className="min-w-0">
         <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
         <p className="text-sm font-medium text-foreground truncate">{value}</p>
@@ -523,22 +261,39 @@ function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string;
   );
 }
 
-function getPasswordStrength(password: string): {
-  score: number;
-  label: string;
-  textColor: string;
-  colors: string[];
-} {
+function FormField({ label, showToggle, onToggle, type, value, onChange, placeholder }: { label: string; showToggle: boolean; onToggle: () => void; type: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-foreground">{label}</label>
+      <div className="relative">
+        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required className="w-full rounded-lg border border-input bg-card py-2.5 px-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all" />
+        <button type="button" onClick={onToggle} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+          {showToggle ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FormInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-foreground">{label}</label>
+      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full rounded-lg border border-input bg-card py-2.5 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all" />
+    </div>
+  );
+}
+
+function getPasswordStrength(password: string): { score: number; label: string; textColor: string; colors: string[] } {
   let score = 0;
   if (password.length >= 6) score++;
   if (password.length >= 10) score++;
   if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
   if (/[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password)) score++;
-
-  if (score <= 1) return { score, label: "Weak", textColor: "text-red-400", colors: ["bg-red-500", "", "", ""] };
-  if (score === 2) return { score, label: "Fair", textColor: "text-amber-400", colors: ["bg-amber-500", "bg-amber-500", "", ""] };
-  if (score === 3) return { score, label: "Good", textColor: "text-blue-400", colors: ["bg-blue-500", "bg-blue-500", "bg-blue-500", ""] };
-  return { score, label: "Strong", textColor: "text-emerald-400", colors: ["bg-emerald-500", "bg-emerald-500", "bg-emerald-500", "bg-emerald-500"] };
+  if (score <= 1) return { score, label: "Weak", textColor: "text-destructive", colors: ["bg-destructive", "", "", ""] };
+  if (score === 2) return { score, label: "Fair", textColor: "text-amber-600", colors: ["bg-amber-500", "bg-amber-500", "", ""] };
+  if (score === 3) return { score, label: "Good", textColor: "text-primary", colors: ["bg-primary", "bg-primary", "bg-primary", ""] };
+  return { score, label: "Strong", textColor: "text-emerald-600", colors: ["bg-emerald-500", "bg-emerald-500", "bg-emerald-500", "bg-emerald-500"] };
 }
 
 export default AccountManagementPage;

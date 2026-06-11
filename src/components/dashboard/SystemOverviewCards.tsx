@@ -29,15 +29,14 @@ function countUniqueNetworks(assets: ExtendedAsset[]): number {
   return ssids.size;
 }
 
-const overviewItems = [
+const items = [
   {
     label: "Agents Reporting",
     icon: Activity,
     getValue: (stats: DashboardStats) => `${stats.online_count}/${stats.total_assets}`,
     sublabel: "online / total",
-    gradient: "from-blue-500/15 to-transparent",
-    iconColor: "text-blue-400",
-    ringColor: "ring-blue-500/20",
+    iconBg: "bg-primary/10",
+    iconColor: "text-primary",
   },
   {
     label: "Total Storage",
@@ -47,36 +46,32 @@ const overviewItems = [
         ? formatBytes(assets.reduce((s, a) => s + a.storage_total_bytes, 0))
         : "N/A",
     sublabel: "across all agents",
-    gradient: "from-violet-500/15 to-transparent",
-    iconColor: "text-violet-400",
-    ringColor: "ring-violet-500/20",
+    iconBg: "bg-violet-50",
+    iconColor: "text-violet-600",
   },
   {
     label: "Disk Issues",
     icon: Clock,
     getValue: (stats: DashboardStats) => stats.disk_issues,
     sublabel: "warning or critical",
-    gradient: "from-amber-500/15 to-transparent",
-    iconColor: "text-amber-400",
-    ringColor: "ring-amber-500/20",
+    iconBg: "bg-amber-50",
+    iconColor: "text-amber-600",
   },
   {
     label: "Unique Locations",
     icon: Globe,
     getValue: (_stats: DashboardStats, assets: ExtendedAsset[]) => countUniqueLocations(assets),
     sublabel: "cities detected",
-    gradient: "from-emerald-500/15 to-transparent",
-    iconColor: "text-emerald-400",
-    ringColor: "ring-emerald-500/20",
+    iconBg: "bg-emerald-50",
+    iconColor: "text-emerald-600",
   },
   {
     label: "WiFi Networks",
     icon: Users,
     getValue: (_stats: DashboardStats, assets: ExtendedAsset[]) => countUniqueNetworks(assets),
     sublabel: "unique SSIDs",
-    gradient: "from-sky-500/15 to-transparent",
-    iconColor: "text-sky-400",
-    ringColor: "ring-sky-500/20",
+    iconBg: "bg-sky-50",
+    iconColor: "text-sky-600",
   },
   {
     label: "Avg CPU Cores",
@@ -87,32 +82,31 @@ const overviewItems = [
       return avg.toFixed(1);
     },
     sublabel: "per agent",
-    gradient: "from-rose-500/15 to-transparent",
-    iconColor: "text-rose-400",
-    ringColor: "ring-rose-500/20",
+    iconBg: "bg-rose-50",
+    iconColor: "text-rose-500",
   },
 ];
 
 export function SystemOverviewCards({ stats, assets }: SystemOverviewCardsProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-      {overviewItems.map((item) => {
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      {items.map((item) => {
         const value = item.getValue(stats, assets);
         return (
           <div
             key={item.label}
-            className={`relative overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-br ${item.gradient} p-4 transition-all hover:border-white/[0.12]`}
+            className="rounded-xl border border-border bg-card p-4 transition-shadow hover:shadow-sm"
           >
-            <div className={`mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ${item.ringColor} bg-white/[0.04]`}>
-              <item.icon className={`h-3.5 w-3.5 ${item.iconColor}`} />
+            <div className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg ${item.iconBg}`}>
+              <item.icon className={`h-4 w-4 ${item.iconColor}`} />
             </div>
-            <p className="text-lg font-bold tracking-tight text-foreground">
+            <p className="text-lg font-bold tracking-tight text-foreground leading-none">
               {value}
             </p>
-            <p className="mt-0.5 text-[11px] font-medium text-muted-foreground leading-tight">
+            <p className="mt-1 text-xs font-medium text-muted-foreground">
               {item.label}
             </p>
-            <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+            <p className="text-[11px] text-muted-foreground/60 mt-0.5">
               {item.sublabel}
             </p>
           </div>

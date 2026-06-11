@@ -7,7 +7,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
 } from "recharts";
 import type { MetricsDataPoint } from "@/lib/types";
 
@@ -19,36 +18,11 @@ interface MetricsChartProps {
 }
 
 const metricConfig: Record<string, { label: string; color: string; unit: string; domain: [number, number | string] }> = {
-  cpu_percent: {
-    label: "CPU %",
-    color: "#60a5fa",
-    unit: "%",
-    domain: [0, 100],
-  },
-  ram_percent: {
-    label: "RAM %",
-    color: "#a78bfa",
-    unit: "%",
-    domain: [0, 100],
-  },
-  storage_percent: {
-    label: "Storage %",
-    color: "#fbbf24",
-    unit: "%",
-    domain: [0, 100],
-  },
-  network_latency_ms: {
-    label: "Latency ms",
-    color: "#34d399",
-    unit: "ms",
-    domain: [0, "auto"] as [number, number | string],
-  },
-  ping_latency_ms: {
-    label: "Ping ms",
-    color: "#34d399",
-    unit: "ms",
-    domain: [0, "auto"] as [number, number | string],
-  },
+  cpu_percent: { label: "CPU %", color: "#3699FF", unit: "%", domain: [0, 100] },
+  ram_percent: { label: "RAM %", color: "#8950FC", unit: "%", domain: [0, 100] },
+  storage_percent: { label: "Storage %", color: "#FFA800", unit: "%", domain: [0, 100] },
+  network_latency_ms: { label: "Latency ms", color: "#1BC5BD", unit: "ms", domain: [0, "auto"] as [number, number | string] },
+  ping_latency_ms: { label: "Ping ms", color: "#1BC5BD", unit: "ms", domain: [0, "auto"] as [number, number | string] },
 };
 
 function formatValue(value: unknown, unit: string): string {
@@ -57,12 +31,7 @@ function formatValue(value: unknown, unit: string): string {
   return `${num.toFixed(1)}${unit}`;
 }
 
-export function MetricsChart({
-  data,
-  metric,
-  color,
-  height = 220,
-}: MetricsChartProps) {
+export function MetricsChart({ data, metric, color, height = 220 }: MetricsChartProps) {
   const config = metricConfig[metric];
   if (!config) {
     return (
@@ -89,38 +58,32 @@ export function MetricsChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={formattedData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-        <CartesianGrid
-          strokeDasharray="3 3"
-          stroke="hsl(217 33% 15%)"
-          vertical={false}
-        />
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
         <XAxis
           dataKey="time"
           axisLine={false}
           tickLine={false}
-          tick={{ fontSize: 11, fill: "hsl(215 20% 55%)" }}
+          tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
           interval="preserveStartEnd"
         />
         <YAxis
           domain={config.domain}
           axisLine={false}
           tickLine={false}
-          tick={{ fontSize: 11, fill: "hsl(215 20% 55%)" }}
+          tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
           width={40}
           unit={config.unit}
         />
         <Tooltip
           contentStyle={{
-            backgroundColor: "hsl(222 47% 10%)",
-            border: "1px solid hsl(217 33% 18%)",
+            backgroundColor: "hsl(var(--card))",
+            border: "1px solid hsl(var(--border))",
             borderRadius: "0.5rem",
             fontSize: "12px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
           }}
-          labelStyle={{ color: "hsl(215 20% 65%)" }}
-          formatter={(value: unknown) => [
-            formatValue(value, config.unit),
-            config.label,
-          ]}
+          labelStyle={{ color: "hsl(var(--muted-foreground))", fontWeight: 500 }}
+          formatter={(value: unknown) => [formatValue(value, config.unit), config.label]}
         />
         <Line
           type="monotone"
@@ -131,7 +94,7 @@ export function MetricsChart({
           activeDot={{
             r: 4,
             fill: chartColor,
-            stroke: "hsl(222 47% 10%)",
+            stroke: "hsl(var(--card))",
             strokeWidth: 2,
           }}
         />

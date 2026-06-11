@@ -8,24 +8,20 @@ export function ThemeToggle() {
 
   useEffect(() => setMounted(true), []);
 
-  if (!mounted) return <div className="h-8 w-8" />; // hindari hydration mismatch
+  if (!mounted) return <div className="h-9 w-9" />;
 
   const isDark = theme === "dark";
 
   return (
     <button
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-        isDark
-          ? "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]"
-          : "border-gray-200 bg-white hover:bg-gray-100"
-      }`}
+      className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card hover:bg-muted transition-colors"
       aria-label="Toggle theme"
     >
       {isDark ? (
-        <Sun className="h-4 w-4 text-amber-400" />
+        <Sun className="h-4 w-4 text-amber-500" />
       ) : (
-        <Moon className="h-4 w-4 text-slate-600" />
+        <Moon className="h-4 w-4 text-muted-foreground" />
       )}
     </button>
   );
