@@ -15,6 +15,7 @@ import {
   X,
   UserCog,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -29,6 +30,7 @@ const mainNavItems = [
 
 const adminNavItems = [
   { to: "/api-keys", icon: Key, label: "API Keys" },
+  { to: "/updates", icon: Download, label: "Agent Updates" },
 ];
 
 const bottomNavItems = [
