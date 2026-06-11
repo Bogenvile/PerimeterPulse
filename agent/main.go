@@ -17,7 +17,7 @@ var (
 	serverURL = flag.String("server", "", "PerimeterPulse server URL (e.g. https://dashboard.example.com)")
 	apiKey    = flag.String("apikey", "", "API key for authentication")
 	hostname  = flag.String("hostname", "", "Override auto-detected hostname")
-	interval  = flag.Int("interval", 60, "Heartbeat interval in seconds")
+	interval  = flag.Int("interval", 3, "Heartbeat interval in seconds")
 )
 
 func main() {
