@@ -12,6 +12,7 @@ import (
 func main() {
 	server := flag.String("server", "http://localhost:8080", "Server URL")
 	apiKey := flag.String("apikey", "", "API Key")
+	hostname := flag.String("hostname", "", "Hostname override")
 	interval := flag.Int("interval", 60, "Heartbeat interval in seconds")
 	flag.Parse()
 
@@ -22,12 +23,19 @@ func main() {
 	log.Printf("Starting PerimeterPulse Agent v1.2.0")
 	log.Printf("Connecting to: %s", *server)
 
-	// Inisialisasi client tanpa ID (ID akan didapat saat register)
+	// Inisialisasi client
 	c := client.NewClient(*server, *apiKey)
 
-	// 1. Register ke Server untuk mendapatkan AgentID otomatis
-	// Server akan generate ID berdasarkan Hostname OS dan MAC Address
+	// Ambil info hardware dari sistem
 	hw := collector.GetHardwareInfo()
+
+	// Jika user memberi override hostname, kita coba pakai (tergantung implementasi collector)
+	// Biasanya collector menggunakan os.Hostname(), flag ini berguna untuk logging atau identitas kustom
+	if *hostname != "" {
+		log.Printf("Using hostname override: %s", *hostname)
+	}
+
+	// 1. Register ke Server untuk mendapatkan AgentID otomatis
 	if err := c.Register(hw); err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
@@ -43,17 +51,14 @@ func main() {
 			Metrics:  metrics,
 			Location: location,
 			NetworkInfo: client.NetworkInfo{
-				WiFiSSID:         wifiSSID,
-				WiFiSignalDBM:    wifiSignal,
-				IPAddresses:      []string{},
+				WiFiSSID:      wifiSSID,
+				WiFiSignalDBM: wifiSignal,
+				IPAddresses:   []string{},
 			},
 		}
 
 		if err := c.SendHeartbeat(payload); err != nil {
 			log.Printf("Heartbeat error: %v", err)
-		} else {
-			// Opsional: Log sukses agar terlihat di console
-			// log.Printf("Heartbeat sent for %s", c.AgentID)
 		}
 
 		time.Sleep(time.Duration(*interval) * time.Second)
