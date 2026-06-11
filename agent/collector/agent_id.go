@@ -1,25 +1,18 @@
 package collector
 
 import (
-	"hash/fnv"
-	"hostname"
+	"os"
 )
 
+// GetAgentID returns a unique ID for the agent based on hostname
 func GetAgentID(customHostname string) string {
-	h := customHostname
-	if h == "" {
-		h, _ = hostname()
-	}
-	if h == "" {
-		h = "unknown-pc"
+	if customHostname != "" {
+		return customHostname
 	}
 	
-	hash := fnv.New32a()
-	hash.Write([]byte(h))
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown-pc"
+	}
 	return h
-}
-
-func hostname() (string, error) {
-	import "os"
-	return os.Hostname()
 }
