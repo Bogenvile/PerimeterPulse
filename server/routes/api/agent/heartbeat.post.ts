@@ -3,39 +3,11 @@ import { readBody, createError } from "nitro/h3";
 import { queryOne, query, insertMetrics, insertLocation, insertErrorLogs } from "../../../db/mysql";
 import { validateApiKeyByValue } from "../../../lib/auth";
 
-interface ErrorLogItem {
-  time: string;
-  id: number;
-  level: string;
-  source: string;
-  message: string;
-}
-
 interface HeartbeatBody {
   agent_id: string; api_key: string;
-  metrics?: {
-    cpu_percent: number; ram_percent: number; ram_used_bytes: number; ram_total_bytes: number;
-    storage_percent: number; storage_used_bytes: number; storage_total_bytes: number;
-    uptime_seconds: number; network_status: "up" | "down" | "degraded";
-    network_latency_ms: number;
-    ping_latency_ms?: number;
-    error_count?: number;
-    error_logs?: ErrorLogItem[];
-    gateway_reachable?: boolean; dns_working?: boolean; internet_reachable?: boolean;
-    default_gateway?: string;
-    disk_health_status?: string; disk_temperature_c?: number;
-    timestamp: string;
-  };
-  location?: {
-    latitude: number; longitude: number; accuracy_meters: number;
-    source: "os" | "geoip"; timestamp: string;
-    city?: string; country?: string;
-  };
-  network_info?: {
-    wifi_ssid: string; wifi_signal_dbm: number;
-    network_speed_mbps: number; ip_addresses: string[];
-    wifi_ip?: string; gateway_ip?: string;
-  };
+  metrics?: any;
+  location?: any;
+  network_info?: any;
 }
 
 export default defineHandler(async (event) => {
@@ -50,6 +22,11 @@ export default defineHandler(async (event) => {
   }
 
   try {
+    // Sanitize inputs to strictly avoid 'undefined' in SQL parameters
+    const m = body.metrics || {};
+    const n = body.network_info || {};
+    const l = body.location || {};
+
     if (body.metrics) {
       await insertMetrics(body.agent_id, body.metrics);
       if (body.metrics.error_logs && body.metrics.error_logs.length > 0) {
@@ -63,9 +40,24 @@ export default defineHandler(async (event) => {
     );
 
     if (asset) {
-      const status = determineStatus(body.metrics);
-      const net = body.network_info;
-      const loc = body.location;
+      const status = determineStatus(m);
+      
+      // Extract values safely, ensuring null is used for DB instead of undefined
+      const locLat = l.latitude != null ? l.latitude : null;
+      const locLng = l.longitude != null ? l.longitude : null;
+      const locCity = l.city || null;
+      const locCountry = l.country || null;
+      
+      const diskHealth = m.disk_health_status || null;
+      const diskTemp = m.disk_temperature_c != null ? m.disk_temperature_c : null;
+      const wifiSsid = n.wifi_ssid || null;
+      const wifiSignal = n.wifi_signal_dbm != null ? n.wifi_signal_dbm : null;
+      const wifiIp = n.wifi_ip || null;
+      const gatewayIp = n.gateway_ip || null;
+      const netSpeed = n.network_speed_mbps != null ? n.network_speed_mbps : null;
+      const pingLat = m.ping_latency_ms != null ? m.ping_latency_ms : null;
+      const errCount = m.error_count != null ? m.error_count : null;
+      const ipAddr = n.ip_addresses ? JSON.stringify(n.ip_addresses) : null;
 
       await query(
         `UPDATE assets SET
@@ -87,14 +79,14 @@ export default defineHandler(async (event) => {
          WHERE agent_id=?`,
         [
           status,
-          loc?.latitude ?? null, loc?.longitude ?? null,
-          loc?.city ?? null, loc?.country ?? null,
-          body.metrics?.disk_health_status ?? null, body.metrics?.disk_temperature_c ?? null,
-          net?.wifi_ssid ?? null, net?.wifi_signal_dbm ?? null,
-          net?.wifi_ip ?? null, net?.gateway_ip ?? null,
-          net?.network_speed_mbps ?? null,
-          body.metrics?.ping_latency_ms ?? null, body.metrics?.error_count ?? null,
-          net?.ip_addresses ? JSON.stringify(net.ip_addresses) : null,
+          locLat, locLng,
+          locCity, locCountry,
+          diskHealth, diskTemp,
+          wifiSsid, wifiSignal,
+          wifiIp, gatewayIp,
+          netSpeed,
+          pingLat, errCount,
+          ipAddr,
           body.agent_id,
         ],
       );
@@ -111,7 +103,7 @@ export default defineHandler(async (event) => {
   return { ok: true, server_time: new Date().toISOString() };
 });
 
-function determineStatus(m?: HeartbeatBody["metrics"]): "online"|"warning"|"critical" {
+function determineStatus(m?: any): "online"|"warning"|"critical" {
   if (!m) return "online";
   if (m.cpu_percent > 98 || m.ram_percent > 98 || m.storage_percent > 99 || m.disk_health_status === "critical") return "critical";
   if (m.cpu_percent > 90 || m.ram_percent > 90 || m.storage_percent > 95 || m.disk_health_status === "warning") return "warning";
