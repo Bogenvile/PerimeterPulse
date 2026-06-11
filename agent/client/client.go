@@ -14,10 +14,12 @@ type Client struct {
 	AgentID   string
 }
 
-func NewClient(serverURL, apiKey string) *Client {
+// NewClient now requires agentID
+func NewClient(serverURL, apiKey, agentID string) *Client {
 	return &Client{
 		ServerURL: serverURL,
 		APIKey:    apiKey,
+		AgentID:   agentID,
 	}
 }
 
@@ -38,7 +40,6 @@ type NetworkInfo struct {
 }
 
 func (c *Client) Register(agentID string, hw interface{}) error {
-	// Convert hardware info to a map to inject api_key
 	payloadData, err := json.Marshal(hw)
 	if err != nil {
 		return fmt.Errorf("failed to marshal hardware info: %w", err)
@@ -49,7 +50,6 @@ func (c *Client) Register(agentID string, hw interface{}) error {
 		return fmt.Errorf("failed to unmarshal hardware info: %w", err)
 	}
 
-	// Inject API Key (Server requires this field)
 	payload["api_key"] = c.APIKey
 	
 	finalPayload, err := json.Marshal(payload)
@@ -78,8 +78,13 @@ func (c *Client) Register(agentID string, hw interface{}) error {
 }
 
 func (c *Client) SendHeartbeat(payload HeartbeatPayload) error {
-	payload.AgentID = c.AgentID
-	payload.APIKey = c.APIKey
+	// CRITICAL FIX: Ensure AgentID and APIKey are set from the client struct
+	if payload.AgentID == "" {
+		payload.AgentID = c.AgentID
+	}
+	if payload.APIKey == "" {
+		payload.APIKey = c.APIKey
+	}
 	
 	data, _ := json.Marshal(payload)
 	url := fmt.Sprintf("%s/api/agent/heartbeat", c.ServerURL)

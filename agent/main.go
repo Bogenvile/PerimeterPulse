@@ -25,7 +25,8 @@ func main() {
 	log.Printf("Connecting to: %s", *server)
 	log.Printf("Agent ID: %s", agentID)
 
-	c := client.NewClient(*server, *apiKey)
+	// FIX: Pass agentID to the client constructor
+	c := client.NewClient(*server, *apiKey, agentID)
 
 	// Initial Registration
 	hw := collector.GetHardwareInfo()
