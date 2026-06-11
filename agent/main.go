@@ -10,6 +10,7 @@ import (
 
 	"perimeterpulse/agent/client"
 	"perimeterpulse/agent/collector"
+	"perimeterpulse/agent/commands"
 )
 
 func main() {
@@ -51,8 +52,9 @@ func main() {
 	ticker := time.NewTicker(time.Duration(*interval) * time.Second)
 	defer ticker.Stop()
 
-	// Langsung kirim heartbeat pertama
+	// Langsung kirim heartbeat pertama & cek commands
 	runHeartbeat(c)
+	checkAndExecuteCommands(c)
 
 	for {
 		select {
@@ -61,14 +63,15 @@ func main() {
 			return
 		case <-ticker.C:
 			runHeartbeat(c)
+			checkAndExecuteCommands(c)
 		}
 	}
 }
 
 func runHeartbeat(c *client.Client) {
-	metrics := collector.CollectMetrics()    // dari collector.go (1 return: MetricsData)
-	location := collector.CollectLocation()  // dari collector.go (1 return: LocationData)
-	network := collector.CollectNetwork()    // dari collector.go (1 return: NetworkInfoData)
+	metrics := collector.CollectMetrics()
+	location := collector.CollectLocation()
+	network := collector.CollectNetwork()
 
 	payload := client.HeartbeatPayload{
 		AgentID:     c.AgentID,
@@ -81,4 +84,8 @@ func runHeartbeat(c *client.Client) {
 	if err := c.SendHeartbeat(payload); err != nil {
 		log.Printf("⚠️  Heartbeat error: %v", err)
 	}
+}
+
+func checkAndExecuteCommands(c *client.Client) {
+	commands.ProcessCommands(c.ServerURL, c.AgentID, c.APIKey)
 }
