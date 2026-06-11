@@ -2,44 +2,37 @@ package collector
 
 import (
 	"encoding/json"
-	"math"
+	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/host"
-	"github.com/shirou/gopsutil/v4/mem"
-	gonet "github.com/shirou/gopsutil/v4/net"
 )
 
-// RegistrationPayload - Data saat agent pertama kali register
-type RegistrationPayload struct {
-	Hostname          string   `json:"hostname"`
-	OS                string   `json:"os"`
-	OSVersion         string   `json:"os_version"`
-	AgentVersion      string   `json:"agent_version"`
-	APIKey            string   `json:"api_key"`
-	MACAddresses      []string `json:"mac_addresses"`
-	IPAddresses       []string `json:"ip_addresses,omitempty"`
-	CPUModel          string   `json:"cpu_model"`
-	CPUCores          int      `json:"cpu_cores,omitempty"`
-	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64   `json:"storage_total_bytes"`
-	DiskModel         string   `json:"disk_model,omitempty"`
-	DiskType          string   `json:"disk_type,omitempty"`
-	WiFiSSID          string   `json:"wifi_ssid,omitempty"`
-	WiFiSignalDBM     int      `json:"wifi_signal_dbm,omitempty"`
-	NetworkSpeedMbps  int      `json:"network_speed_mbps,omitempty"`
+// ──── Types — must match dashboard ────
+
+type RegistrationInfo struct {
+	Hostname         string   `json:"hostname"`
+	OS               string   `json:"os"`
+	OSVersion        string   `json:"os_version"`
+	AgentVersion     string   `json:"agent_version"`
+	MACAddresses     []string `json:"mac_addresses"`
+	IPAddresses      []string `json:"ip_addresses"`
+	CPUModel         string   `json:"cpu_model"`
+	CPUCores         int      `json:"cpu_cores"`
+	RAMTotalBytes    uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64  `json:"storage_total_bytes"`
+	DiskModel        string   `json:"disk_model"`
+	DiskType         string   `json:"disk_type"`
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps int      `json:"network_speed_mbps"`
+	APIKey           string   `json:"api_key"`
 }
 
-// MetricsData - Data metrics untuk heartbeat
 type MetricsData struct {
 	CPUPercent        float64 `json:"cpu_percent"`
 	RAMPercent        float64 `json:"ram_percent"`
@@ -48,453 +41,492 @@ type MetricsData struct {
 	StoragePercent    float64 `json:"storage_percent"`
 	StorageUsedBytes  uint64  `json:"storage_used_bytes"`
 	StorageTotalBytes uint64  `json:"storage_total_bytes"`
-	UptimeSeconds     float64 `json:"uptime_seconds"`
+	UptimeSeconds     uint64  `json:"uptime_seconds"`
 	NetworkStatus     string  `json:"network_status"`
-	NetworkLatencyMs  float64 `json:"network_latency_ms"`
-	PingLatencyMs     float64 `json:"ping_latency_ms,omitempty"`
-	ErrorCount        int     `json:"error_count,omitempty"`
-	GatewayReachable  bool    `json:"gateway_reachable,omitempty"`
-	DNSWorking        bool    `json:"dns_working,omitempty"`
-	InternetReachable bool    `json:"internet_reachable,omitempty"`
-	DefaultGateway    string  `json:"default_gateway,omitempty"`
-	DiskHealthStatus  string  `json:"disk_health_status,omitempty"`
-	DiskTemperatureC  float64 `json:"disk_temperature_c,omitempty"`
+	NetworkLatencyMs  int     `json:"network_latency_ms"`
+	PingLatencyMs     int     `json:"ping_latency_ms"`
+	ErrorCount        int     `json:"error_count"`
+	DiskHealthStatus  string  `json:"disk_health_status"`
+	DiskTemperatureC  int     `json:"disk_temperature_c"`
 	Timestamp         string  `json:"timestamp"`
+
+	// Network diagnostics
+	GatewayReachable   bool   `json:"gateway_reachable"`
+	DNSWorking         bool   `json:"dns_working"`
+	InternetReachable  bool   `json:"internet_reachable"`
+	DefaultGateway     string `json:"default_gateway"`
 }
 
-// LocationData - Data lokasi
 type LocationData struct {
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AccuracyMeters float64 `json:"accuracy_meters"`
-	Source         string  `json:"source"`
-	Timestamp      string  `json:"timestamp"`
-	City           string  `json:"city,omitempty"`
-	Country        string  `json:"country,omitempty"`
+	Latitude        float64 `json:"latitude"`
+	Longitude       float64 `json:"longitude"`
+	AccuracyMeters  int     `json:"accuracy_meters"`
+	Source          string  `json:"source"`
+	Timestamp       string  `json:"timestamp"`
 }
 
-// NetworkInfo - Data network untuk heartbeat
-type NetworkInfo struct {
+type NetworkInfoData struct {
 	WiFiSSID         string   `json:"wifi_ssid"`
 	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
 	NetworkSpeedMbps int      `json:"network_speed_mbps"`
-	IPAddresses      []string `json:"ip_addresses"`
 	WiFiIP           string   `json:"wifi_ip,omitempty"`
 	GatewayIP        string   `json:"gateway_ip,omitempty"`
+	IPAddresses      []string `json:"ip_addresses"`
 }
 
-// CollectInfo mengumpulkan informasi sistem untuk registrasi
-func CollectInfo(apiKey string) RegistrationPayload {
-	info := RegistrationPayload{APIKey: apiKey, AgentVersion: "1.2.0"}
+// ──── CollectInfo — one-shot registration payload ────
 
-	// Hostname
-	h, _ := os.Hostname()
-	info.Hostname = h
+func collectInfo(apiKey string) RegistrationInfo {
+	hn, _ := os.Hostname()
+	osName, osVer := detectOS()
 
-	// OS Info
-	if runtime.GOOS == "windows" {
-		info.OS = "Windows"
-		out, _ := exec.Command("cmd", "/c", "ver").Output()
-		info.OSVersion = strings.TrimSpace(string(out))
-	} else {
-		info.OS = runtime.GOOS
-		out, _ := exec.Command("uname", "-r").Output()
-		info.OSVersion = strings.TrimSpace(string(out))
+	totalRAM := getTotalRAM()
+	totalDisk, _ := GetDiskUsage()
+	diskModel := GetDiskModel()
+	diskType := DetectDiskType()
+
+	wifiInfo := GetWiFiInfo()
+	macs := GetMACAddresses()
+	ips := getLocalIPs()
+
+	cpuModel, cpuCores := detectCPU()
+
+	return RegistrationInfo{
+		Hostname:         hn,
+		OS:               osName,
+		OSVersion:        osVer,
+		AgentVersion:     "1.2.0",
+		MACAddresses:     macs,
+		IPAddresses:      ips,
+		CPUModel:         cpuModel,
+		CPUCores:         cpuCores,
+		RAMTotalBytes:    totalRAM,
+		StorageTotalBytes: totalDisk,
+		DiskModel:        diskModel,
+		DiskType:         diskType,
+		WiFiSSID:         wifiInfo.SSID,
+		WiFiSignalDBM:    wifiInfo.SignalDBM,
+		NetworkSpeedMbps: wifiInfo.LinkSpeed,
+		APIKey:           apiKey,
 	}
-
-	// CPU Info
-	cpuInfo, _ := cpu.Info()
-	if len(cpuInfo) > 0 {
-		info.CPUModel = cpuInfo[0].ModelName
-		info.CPUCores = int(cpuInfo[0].Cores)
-	}
-
-	// RAM Info
-	memInfo, _ := mem.VirtualMemory()
-	info.RAMTotalBytes = memInfo.Total
-
-	// Storage Info
-	partitions, _ := disk.Partitions(false)
-	for _, p := range partitions {
-		usage, err := disk.Usage(p.Mountpoint)
-		if err == nil && usage.Total > info.StorageTotalBytes {
-			info.StorageTotalBytes = usage.Total
-			info.DiskModel = p.Device
-			fs := strings.ToLower(p.Fstype)
-			if strings.Contains(fs, "ntfs") || strings.Contains(fs, "ext4") || strings.Contains(fs, "apfs") {
-				info.DiskType = "HDD"
-			} else {
-				info.DiskType = "SSD"
-			}
-		}
-	}
-
-	// MAC & IP Addresses
-	ifaces, _ := net.Interfaces()
-	for _, iface := range ifaces {
-		if iface.Name == "lo" || strings.HasPrefix(iface.Name, "Loopback") || (iface.Flags&net.FlagLoopback != 0) {
-			continue
-		}
-		info.MACAddresses = append(info.MACAddresses, iface.HardwareAddr.String())
-		
-		addrs, _ := iface.Addrs()
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil {
-					info.IPAddresses = append(info.IPAddresses, ipnet.IP.String())
-				}
-			}
-		}
-	}
-
-	// WiFi Info (Windows)
-	if runtime.GOOS == "windows" {
-		out, _ := exec.Command("netsh", "wlan", "show", "interfaces").Output()
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "SSID") && !strings.Contains(line, "BSSID") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					info.WiFiSSID = strings.TrimSpace(parts[1])
-				}
-			}
-			if strings.Contains(line, "Signal") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					signal := strings.TrimSpace(parts[1])
-					signal = strings.TrimSuffix(signal, "%")
-					if sig, err := strconv.Atoi(signal); err == nil {
-						info.WiFiSignalDBM = -100 + sig
-					}
-				}
-			}
-		}
-	}
-
-	return info
 }
 
-// CollectMetrics mengumpulkan metrics untuk heartbeat
+// ──── CollectMetrics — runtime snapshot ────
+
 func CollectMetrics() MetricsData {
-	metrics := MetricsData{Timestamp: time.Now().UTC().Format(time.RFC3339)}
-
-	// CPU
-	cpuPercent, _ := cpu.Percent(0, false)
-	if len(cpuPercent) > 0 {
-		metrics.CPUPercent = cpuPercent[0]
+	now := time.Now().UTC().Format(time.RFC3339)
+	totalRAM := getTotalRAM()
+	usedRAM := getUsedRAM()
+	ramPct := 0.0
+	if totalRAM > 0 {
+		ramPct = (float64(usedRAM) / float64(totalRAM)) * 100
 	}
 
-	// RAM
-	memInfo, _ := mem.VirtualMemory()
-	metrics.RAMPercent = memInfo.UsedPercent
-	metrics.RAMUsedBytes = memInfo.Used
-	metrics.RAMTotalBytes = memInfo.Total
+	totalDisk, usedDisk := GetDiskUsage()
+	diskPct := 0.0
+	if totalDisk > 0 {
+		diskPct = (float64(usedDisk) / float64(totalDisk)) * 100
+	}
 
-	// Storage
-	partitions, _ := disk.Partitions(false)
-	maxUsage := 0.0
-	for _, p := range partitions {
-		usage, err := disk.Usage(p.Mountpoint)
-		if err == nil {
-			metrics.StorageUsedBytes += usage.Used
-			metrics.StorageTotalBytes += usage.Total
-			if usage.UsedPercent > maxUsage {
-				maxUsage = usage.UsedPercent
+	cpuPct := getCPUUsage()
+
+	pingMs := ping8x8()
+	netStatus := "up"
+	if pingMs == -1 {
+		netStatus = "degraded"
+	}
+
+	// Network diagnostics
+	wifiInfo := GetWiFiInfo()
+	gatewayReachable := isGatewayReachable(wifiInfo.Gateway)
+	dnsWorking := isDNWorking()
+	internetReachable := isInternetReachable()
+
+	diskHealth, diskTemp := getDiskHealth()
+
+	return MetricsData{
+		CPUPercent:        cpuPct,
+		RAMPercent:        ramPct,
+		RAMUsedBytes:      usedRAM,
+		RAMTotalBytes:     totalRAM,
+		StoragePercent:    diskPct,
+		StorageUsedBytes:  usedDisk,
+		StorageTotalBytes: totalDisk,
+		UptimeSeconds:     getUptime(),
+		NetworkStatus:     netStatus,
+		NetworkLatencyMs:  pingMs,
+		PingLatencyMs:     pingMs,
+		ErrorCount:        0,
+		DiskHealthStatus:  diskHealth,
+		DiskTemperatureC:  diskTemp,
+		Timestamp:         now,
+		GatewayReachable:  gatewayReachable,
+		DNSWorking:        dnsWorking,
+		InternetReachable: internetReachable,
+		DefaultGateway:    wifiInfo.Gateway,
+	}
+}
+
+// ──── CollectLocation ────
+
+func CollectLocation() LocationData {
+	lat, lng, acc, src := getLocation()
+	return LocationData{
+		Latitude:       lat,
+		Longitude:      lng,
+		AccuracyMeters: acc,
+		Source:         src,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// ──── CollectNetwork — WiFi + IP info ────
+
+func CollectNetwork() NetworkInfoData {
+	wifiInfo := GetWiFiInfo()
+	ipList := getLocalIPs()
+
+	// Prioritaskan IP dari WiFi info, fallback ke list
+	wifiIP := wifiInfo.IP
+	if wifiIP == "" && len(ipList) > 0 {
+		wifiIP = ipList[0]
+	}
+
+	return NetworkInfoData{
+		WiFiSSID:         wifiInfo.SSID,
+		WiFiSignalDBM:    wifiInfo.SignalDBM,
+		NetworkSpeedMbps: wifiInfo.LinkSpeed,
+		WiFiIP:           wifiIP,
+		GatewayIP:        wifiInfo.Gateway,
+		IPAddresses:      ipList,
+	}
+}
+
+// ──── Helpers ────
+
+func detectOS() (string, string) {
+	switch runtime.GOOS {
+	case "windows":
+		return detectWindowsVersion()
+	case "linux":
+		return detectLinuxVersion()
+	default:
+		return runtime.GOOS, ""
+	}
+}
+
+func detectWindowsVersion() (string, string) {
+	cmd := exec.Command("cmd", "/C", "ver")
+	out, err := cmd.Output()
+	if err != nil {
+		return "Windows", ""
+	}
+	ver := strings.TrimSpace(string(out))
+	// "Microsoft Windows [Version 10.0.19045.5246]" -> "10.0.19045"
+	idx := strings.Index(ver, "Version")
+	if idx >= 0 {
+		verPart := strings.TrimSpace(ver[idx+len("Version"):])
+		verPart = strings.TrimRight(verPart, "]")
+		return "Windows", strings.TrimSpace(verPart)
+	}
+	return "Windows", ver
+}
+
+func detectLinuxVersion() (string, string) {
+	data, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return "Linux", ""
+	}
+	name := "Linux"
+	version := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "PRETTY_NAME=") {
+			v := strings.Trim(line[len("PRETTY_NAME="):], `"`)
+			if strings.Contains(strings.ToLower(v), "ubuntu") {
+				name = "Ubuntu"
+			} else if strings.Contains(strings.ToLower(v), "lubuntu") {
+				name = "Lubuntu"
+			} else if strings.Contains(strings.ToLower(v), "debian") {
+				name = "Debian"
+			}
+			version = v
+		}
+	}
+	return name, version
+}
+
+func detectCPU() (string, int) {
+	cmd := exec.Command("wmic", "cpu", "get", "Name,NumberOfCores", "/format:value")
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown", 0
+	}
+	model := "unknown"
+	cores := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Name=") {
+			model = strings.TrimPrefix(line, "Name=")
+		}
+		if strings.HasPrefix(line, "NumberOfCores=") {
+			if v, err := strconv.Atoi(strings.TrimPrefix(line, "NumberOfCores=")); err == nil {
+				cores = v
 			}
 		}
 	}
-	metrics.StoragePercent = maxUsage
-
-	// Uptime
-	bootTime, _ := host.BootTime()
-	metrics.UptimeSeconds = float64(time.Now().Unix()) - float64(bootTime)
-
-	// Network Diagnostics
-	metrics.NetworkStatus = checkNetwork(&metrics)
-
-	// SMART Disk Health
-	checkSMART(&metrics)
-
-	return metrics
+	return model, cores
 }
 
-// CollectLocation mengumpulkan data lokasi
-func CollectLocation() LocationData {
-	loc := LocationData{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Source:    "geoip",
+func getTotalRAM() uint64 {
+	cmd := exec.Command("wmic", "computersystem", "get", "TotalPhysicalMemory", "/format:value")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
 	}
-
-	// Try GeoIP first (always works)
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://ip-api.com/json")
-	if err == nil {
-		defer resp.Body.Close()
-		var geoResp struct {
-			Lat     float64 `json:"lat"`
-			Lon     float64 `json:"lon"`
-			City    string  `json:"city"`
-			Country string  `json:"country"`
-			Status  string  `json:"status"`
-		}
-		if json.NewDecoder(resp.Body).Decode(&geoResp) == nil && geoResp.Status == "success" {
-			loc.Latitude = geoResp.Lat
-			loc.Longitude = geoResp.Lon
-			loc.City = geoResp.City
-			loc.Country = geoResp.Country
-			loc.AccuracyMeters = 50000 // GeoIP accuracy is ~50km
-			return loc
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "TotalPhysicalMemory=") {
+			if v, err := strconv.ParseUint(strings.TrimPrefix(line, "TotalPhysicalMemory="), 10, 64); err == nil {
+				return v
+			}
 		}
 	}
-
-	// Fallback: Google DNS location (8.8.8.8)
-	loc.Latitude = 37.4056
-	loc.Longitude = -122.0775
-	loc.AccuracyMeters = 100000
-	return loc
+	return 0
 }
 
-// CollectNetwork mengumpulkan informasi network
-func CollectNetwork() NetworkInfo {
-	netInfo := NetworkInfo{}
+func getUsedRAM() uint64 {
+	cmd := exec.Command("wmic", "OS", "get", "FreePhysicalMemory", "/format:value")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	total := getTotalRAM()
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "FreePhysicalMemory=") {
+			if v, err := strconv.ParseUint(strings.TrimPrefix(line, "FreePhysicalMemory="), 10, 64); err == nil {
+				return total - (v * 1024)
+			}
+		}
+	}
+	return 0
+}
 
-	// IP Addresses
-	ifaces, _ := net.Interfaces()
-	for _, iface := range ifaces {
-		if iface.Name == "lo" || strings.HasPrefix(iface.Name, "Loopback") || (iface.Flags&net.FlagLoopback != 0) {
+func getCPUUsage() float64 {
+	cmd := exec.Command("wmic", "cpu", "get", "LoadPercentage", "/format:value")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "LoadPercentage=") {
+			if v, err := strconv.ParseFloat(strings.TrimPrefix(line, "LoadPercentage="), 64); err == nil {
+				return v
+			}
+		}
+	}
+	return 0
+}
+
+func getUptime() uint64 {
+	cmd := exec.Command("wmic", "os", "get", "LastBootUpTime", "/format:value")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "LastBootUpTime=") {
+			bootStr := strings.TrimPrefix(line, "LastBootUpTime=")
+			// Format: 20250527092743.500000+420
+			if len(bootStr) >= 14 {
+				y, _ := strconv.Atoi(bootStr[0:4])
+				m, _ := strconv.Atoi(bootStr[4:6])
+				d, _ := strconv.Atoi(bootStr[6:8])
+				h, _ := strconv.Atoi(bootStr[8:10])
+				min, _ := strconv.Atoi(bootStr[10:12])
+				s, _ := strconv.Atoi(bootStr[12:14])
+				bootTime := time.Date(y, time.Month(m), d, h, min, s, 0, time.Local)
+				return uint64(time.Since(bootTime).Seconds())
+			}
+		}
+	}
+	return 0
+}
+
+func getLocalIPs() []string {
+	var ips []string
+	seen := map[string]bool{}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
-		addrs, _ := iface.Addrs()
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
 		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil {
-					netInfo.IPAddresses = append(netInfo.IPAddresses, ipnet.IP.String())
-				}
-			}
-		}
-	}
-
-	// WiFi Info (Windows)
-	if runtime.GOOS == "windows" {
-		out, _ := exec.Command("netsh", "wlan", "show", "interfaces").Output()
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "SSID") && !strings.Contains(line, "BSSID") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					netInfo.WiFiSSID = strings.TrimSpace(parts[1])
-				}
-			}
-			if strings.Contains(line, "Signal") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					signal := strings.TrimSpace(parts[1])
-					signal = strings.TrimSuffix(signal, "%")
-					if sig, err := strconv.Atoi(signal); err == nil {
-						netInfo.WiFiSignalDBM = -100 + sig
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				ip4 := ipNet.IP.To4()
+				if ip4 != nil && !ip4.IsLoopback() && !ip4.IsLinkLocalUnicast() {
+					ipStr := ip4.String()
+					if !seen[ipStr] {
+						ips = append(ips, ipStr)
+						seen[ipStr] = true
 					}
 				}
 			}
 		}
 	}
+	return ips
+}
 
-	// Network Speed (approximate)
-	ioCounters, _ := gonet.IOCounters(true)
-	for _, counter := range ioCounters {
-		if counter.BytesSent > 0 || counter.BytesRecv > 0 {
-			totalBytes := counter.BytesSent + counter.BytesRecv
-			speedMbps := float64(totalBytes) * 8 / 1000000 / 60 // per minute average
-			netInfo.NetworkSpeedMbps = int(speedMbps)
-			break
+func ping8x8() int {
+	cmd := exec.Command("ping", "-n", "1", "-w", "2000", "8.8.8.8")
+	out, err := cmd.Output()
+	if err != nil {
+		return -1
+	}
+	output := string(out)
+	// "time=17ms" or "time<1ms"
+	if idx := strings.LastIndex(output, "time="); idx >= 0 {
+		rest := output[idx+len("time="):]
+		if end := strings.IndexAny(rest, "ms \n"); end > 0 {
+			msStr := rest[:end]
+			if msStr == "<1" {
+				return 1
+			}
+			if v, err := strconv.Atoi(msStr); err == nil {
+				return v
+			}
+		}
+	}
+	return -1
+}
+
+func getDiskHealth() (string, int) {
+	if runtime.GOOS != "windows" {
+		return "unknown", 0
+	}
+	// SMART health via wmic diskdrive
+	cmd := exec.Command("wmic", "diskdrive", "get", "Status", "/format:value")
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown", 0
+	}
+	status := "unknown"
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Status=") {
+			s := strings.TrimPrefix(line, "Status=")
+			switch strings.ToLower(s) {
+			case "ok":
+				status = "ok"
+			case "pred fail":
+				status = "warning"
+			default:
+				status = "unknown"
+			}
 		}
 	}
 
-	return netInfo
+	temp := getDiskTemperature()
+	return status, temp
 }
 
-// checkNetwork melakukan network diagnostics
-func checkNetwork(metrics *MetricsData) string {
-	// Check default gateway
-	gateway := getDefaultGateway()
-	metrics.DefaultGateway = gateway
+func getDiskTemperature() int {
+	// Try PowerShell first (NVMe can expose temperature)
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		`Get-PhysicalDisk | Where-Object {$_.OperationalStatus -eq 'OK'} | Select-Object -First 1 | ForEach-Object { 
+			$temp = Get-CimInstance -Namespace root/wmi -ClassName MSStorageDriver_ATAPISmartData | Where-Object {$_.InstanceName -like "*PHYSICALDRIVE*"} | Select-Object -ExpandProperty Temperature
+			if ($temp) { $temp } else { "0" }
+		}`)
+	out, err := cmd.Output()
+	if err == nil {
+		tempStr := strings.TrimSpace(string(out))
+		if v, err := strconv.Atoi(tempStr); err == nil && v > 0 {
+			return v
+		}
+	}
 
+	return 0
+}
+
+func isGatewayReachable(gateway string) bool {
 	if gateway == "" {
-		metrics.NetworkStatus = "down"
-		return "down"
+		return false
 	}
-
-	// Ping gateway
-	gwReachable := pingHost(gateway, 1000)
-	metrics.GatewayReachable = gwReachable
-
-	if !gwReachable {
-		metrics.NetworkStatus = "limited"
-		return "limited"
-	}
-
-	// Check DNS
-	dnsWorking := checkDNS()
-	metrics.DNSWorking = dnsWorking
-
-	// Check internet (ping 8.8.8.8)
-	internetReachable := pingHost("8.8.8.8", 2000)
-	metrics.InternetReachable = internetReachable
-
-	// Measure latency
-	latency := measureLatency("8.8.8.8", 3)
-	metrics.PingLatencyMs = latency
-
-	if internetReachable {
-		metrics.NetworkStatus = "up"
-		metrics.NetworkLatencyMs = latency
-		return "up"
-	}
-
-	if dnsWorking {
-		metrics.NetworkStatus = "degraded"
-		metrics.NetworkLatencyMs = latency
-		return "degraded"
-	}
-
-	metrics.NetworkStatus = "limited"
-	return "limited"
+	cmd := exec.Command("ping", "-n", "1", "-w", "1000", gateway)
+	err := cmd.Run()
+	return err == nil
 }
 
-func getDefaultGateway() string {
-	if runtime.GOOS == "windows" {
-		out, _ := exec.Command("ipconfig").Output()
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			if strings.Contains(strings.ToLower(line), "default gateway") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					gw := strings.TrimSpace(parts[1])
-					if gw != "" && gw != "0.0.0.0" {
-						return gw
-					}
-				}
-			}
-		}
-	} else {
-		out, _ := exec.Command("ip", "route", "show", "default").Output()
-		parts := strings.Fields(string(out))
-		if len(parts) >= 3 {
-			return parts[2]
-		}
-	}
-	return ""
-}
-
-func pingHost(host string, timeoutMs int) bool {
-	if runtime.GOOS == "windows" {
-		out, err := exec.Command("ping", "-n", "1", "-w", strconv.Itoa(timeoutMs), host).Output()
-		return err == nil && strings.Contains(string(out), "Reply from")
-	}
-	out, err := exec.Command("ping", "-c", "1", "-W", strconv.Itoa(timeoutMs/1000), host).Output()
-	return err == nil && strings.Contains(string(out), "1 received")
-}
-
-func checkDNS() bool {
+func isDNWorking() bool {
 	_, err := net.LookupHost("google.com")
 	return err == nil
 }
 
-func measureLatency(host string, attempts int) float64 {
-	var total float64
-	count := 0
-
-	for i := 0; i < attempts; i++ {
-		start := time.Now()
-		if pingHost(host, 1000) {
-			total += float64(time.Since(start).Milliseconds())
-			count++
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-
-	if count == 0 {
-		return 0
-	}
-	return math.Round(total/float64(count)*10) / 10
+func isInternetReachable() bool {
+	cmd := exec.Command("ping", "-n", "1", "-w", "2000", "8.8.8.8")
+	err := cmd.Run()
+	return err == nil
 }
 
-// checkSMART melakukan SMART check untuk disk health
-func checkSMART(metrics *MetricsData) {
-	metrics.DiskHealthStatus = "unknown"
-
+func getLocation() (float64, float64, int, string) {
 	if runtime.GOOS == "windows" {
-		// Windows: Use wmic diskdrive get status
-		out, err := exec.Command("wmic", "diskdrive", "get", "status").Output()
-		if err == nil {
-			lines := strings.Split(string(out), "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line == "Status" || line == "" {
-					continue
-				}
-				if strings.Contains(strings.ToLower(line), "ok") {
-					metrics.DiskHealthStatus = "ok"
-				} else if strings.Contains(strings.ToLower(line), "pred fail") || strings.Contains(strings.ToLower(line), "bad") {
-					metrics.DiskHealthStatus = "critical"
-				} else {
-					metrics.DiskHealthStatus = "warning"
-				}
-			}
-		}
-
-		// Temperature via WMI (if available)
-		tempOut, _ := exec.Command("wmic", "msstorage_temperature", "get", "CurrentTemperature").Output()
-		if len(tempOut) > 0 {
-			lines := strings.Split(string(tempOut), "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line == "CurrentTemperature" || line == "" {
-					continue
-				}
-				if temp, err := strconv.ParseFloat(line, 64); err == nil {
-					// WMI temperature is in Kelvin, convert to Celsius
-					metrics.DiskTemperatureC = temp - 273.15
-				}
-			}
-		}
-	} else {
-		// Linux: Use smartmontools
-		smartCheckDisk("/dev/sda", metrics)
-		if metrics.DiskHealthStatus == "unknown" {
-			smartCheckDisk("/dev/nvme0n1", metrics)
-		}
+		return getLocationWindows()
 	}
+	return getLocationLinux()
 }
 
-func smartCheckDisk(device string, metrics *MetricsData) {
-	// Check SMART overall health
-	out, err := exec.Command("smartctl", "-H", device).Output()
+func getLocationWindows() (float64, float64, int, string) {
+	type geoResp struct {
+		Lat float64 `json:"lat"`
+		Lon float64 `json:"lon"`
+	}
+
+	resp, err := httpGet("https://ipapi.co/json/", 5*time.Second)
 	if err != nil {
-		return
+		return 0, 0, 99999, "geoip_failed"
 	}
 
-	output := strings.ToLower(string(out))
-	if strings.Contains(output, "passed") || strings.Contains(output, "ok") {
-		metrics.DiskHealthStatus = "ok"
-	} else if strings.Contains(output, "failed") || strings.Contains(output, "critical") {
-		metrics.DiskHealthStatus = "critical"
-	} else {
-		metrics.DiskHealthStatus = "warning"
+	var geo geoResp
+	if err := json.Unmarshal([]byte(resp), &geo); err != nil {
+		return 0, 0, 99999, "geoip_failed"
 	}
 
-	// Get temperature
-	tempOut, _ := exec.Command("smartctl", "-A", device).Output()
-	tempOutput := string(tempOut)
-	lines := strings.Split(tempOutput, "\n")
-	for _, line := range lines {
-		if strings.Contains(strings.ToLower(line), "temperature") || strings.Contains(strings.ToLower(line), "temp") {
-			fields := strings.Fields(line)
-			for _, field := range fields {
-				if temp, err := strconv.ParseFloat(field, 64); err == nil && temp > 0 && temp < 100 {
-					metrics.DiskTemperatureC = temp
-					break
-				}
-			}
-		}
-	}
+	return geo.Lat, geo.Lon, 5000, "geoip"
 }
+
+func getLocationLinux() (float64, float64, int, string) {
+	// Try GeoClue via D-Bus or fallback to geoip
+	return getLocationWindows() // fallback for now
+}
+
+// HTTP client dengan timeout
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+func httpGet(url string, timeout time.Duration) (string, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// Helper untuk import
+import (
+	"io"
+	"net/http"
+)

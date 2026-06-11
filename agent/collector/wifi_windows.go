@@ -1,104 +1,184 @@
-//go:build windows
-
 package collector
 
 import (
-	"syscall"
-	"unsafe"
+	"fmt"
+	"net"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
-var (
-	wlanapi          = syscall.NewLazyDLL("wlanapi.dll")
-	procOpenHandle   = wlanapi.NewProc("WlanOpenHandle")
-	procCloseHandle  = wlanapi.NewProc("WlanCloseHandle")
-	procEnumInterfaces = wlanapi.NewProc("WlanEnumInterfaces")
-	procQueryInterface = wlanapi.NewProc("WlanQueryInterface")
-)
-
-type WLAN_INTERFACE_INFO struct {
-	InterfaceGuid           [16]byte
-	strInterfaceDescription [256]uint16
-	isState                 uint32
+// WiFiInfo holds WiFi network information
+type WiFiInfo struct {
+	SSID      string
+	SignalDBM int
+	IP        string
+	MAC       string
+	Gateway   string
+	LinkSpeed int // Mbps
 }
 
-type WLAN_INTERFACE_INFO_LIST struct {
-	NumberOfItems uint32
-	Index         uint32
-	InterfaceInfo [1]WLAN_INTERFACE_INFO
-}
+// GetWiFiInfo retrieves WiFi info using netsh wlan
+func GetWiFiInfo() WiFiInfo {
+	var info WiFiInfo
+	info.SignalDBM = -999 // default: no signal
 
-type DOT11_SSID struct {
-	uSSIDLength uint32
-	ucSSID      [32]byte
-}
-
-type WLAN_ASSOCIATION_ATTRIBUTES struct {
-	dot11Ssid         DOT11_SSID
-	dot11Bssid        [6]byte
-	dot11BssType      uint32
-	dot11PhyType      uint32
-	uDot11PhyIndex    uint32
-	wlanSignalQuality uint32
-	dot11Rate         uint32
-}
-
-type WLAN_SECURITY_ATTRIBUTES struct {
-	bSecurityEnabled     uint32
-	bOneXEnabled         uint32
-	dot11AuthAlgorithm   uint32
-	dot11CipherAlgorithm uint32
-}
-
-type WLAN_CONNECTION_ATTRIBUTES struct {
-	isState                   uint32
-	wlanConnectionMode        uint32
-	strProfileName            [256]uint16
-	wlanAssociationAttributes WLAN_ASSOCIATION_ATTRIBUTES
-	wlanSecurityAttributes    WLAN_SECURITY_ATTRIBUTES
-}
-
-func GetWifiInfo() (string, int, string) {
-	var handle uint32
-	var negotiatedVersion uint32
-
-	ret, _, _ := procOpenHandle.Call(uintptr(2), 0, uintptr(unsafe.Pointer(&negotiatedVersion)), uintptr(unsafe.Pointer(&handle)))
-	if ret != 0 { return "", 0, "" }
-	defer procCloseHandle.Call(uintptr(handle), 0)
-
-	var pInterfaceList *WLAN_INTERFACE_INFO_LIST
-	ret, _, _ = procEnumInterfaces.Call(uintptr(handle), 0, uintptr(unsafe.Pointer(&pInterfaceList)))
-	if ret != 0 || pInterfaceList == nil || pInterfaceList.NumberOfItems == 0 {
-		return "", 0, ""
+	// Get connected WiFi interface info
+	cmd := exec.Command("netsh", "wlan", "show", "interfaces")
+	output, err := cmd.Output()
+	if err != nil {
+		return info
 	}
 
-	ifaceList := (*pInterfaceList)
-	iface := ifaceList.InterfaceInfo[0]
-
-	var dataSize uint32
-	var pData *byte
-	opCode := uint32(7) // wlan_intf_opcode_current_connection
-
-	ret, _, _ = procQueryInterface.Call(
-		uintptr(handle),
-		uintptr(unsafe.Pointer(&iface.InterfaceGuid)),
-		uintptr(opCode),
-		0,
-		uintptr(unsafe.Pointer(&dataSize)),
-		uintptr(unsafe.Pointer(&pData)),
-		0,
-	)
-
-	if ret != 0 { return "", 0, "" }
-
-	connAttr := (*WLAN_CONNECTION_ATTRIBUTES)(unsafe.Pointer(pData))
-	ssidBytes := connAttr.wlanAssociationAttributes.dot11Ssid.ucSSID[:connAttr.wlanAssociationAttributes.dot11Ssid.uSSIDLength]
-	ssid := string(ssidBytes)
-
-	quality := connAttr.wlanAssociationAttributes.wlanSignalQuality
-	dBm := -100
-	if quality > 0 {
-		dBm = -100 + int(quality)/2
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "SSID") && strings.Contains(line, ":"):
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				info.SSID = strings.TrimSpace(parts[1])
+			}
+		case strings.HasPrefix(line, "Signal") && strings.Contains(line, ":"):
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				signalStr := strings.TrimSuffix(strings.TrimSpace(parts[1]), "%")
+				if pct, err := strconv.Atoi(signalStr); err == nil {
+					// Convert quality % to approximate dBm
+					// Typical: 100% ≈ -30 dBm, 0% ≈ -90 dBm
+					info.SignalDBM = -90 + (pct * 60 / 100)
+				}
+			}
+		case strings.HasPrefix(line, "Receive rate") || strings.HasPrefix(line, "Transmit rate"):
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 && info.LinkSpeed == 0 {
+				rateStr := strings.TrimSpace(parts[1])
+				rateStr = strings.TrimSuffix(rateStr, "Mbps")
+				rateStr = strings.TrimSpace(rateStr)
+				if rate, err := strconv.Atoi(rateStr); err == nil {
+					info.LinkSpeed = rate
+				}
+			}
+		}
 	}
 
-	return ssid, dBm, ""
+	// Get IP, MAC, Gateway from active interface
+	info.IP, info.MAC, info.Gateway = getActiveNetworkInfo()
+
+	return info
+}
+
+// getActiveNetworkInfo finds the IP, MAC, and gateway of the active network interface
+func getActiveNetworkInfo() (ip string, mac string, gateway string) {
+	// Get list of network interfaces
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", "", ""
+	}
+
+	var activeInterface *net.Interface
+	var activeIP string
+	var activeGateway string
+
+	for _, iface := range interfaces {
+		// Skip loopback and down interfaces
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+
+			ipv4 := ipNet.IP.To4()
+			if ipv4 == nil || ipv4.IsLoopback() || ipv4.IsLinkLocalUnicast() {
+				continue
+			}
+
+			// Check if this interface has a default gateway
+			gw := getDefaultGatewayForInterface(iface.Index)
+			if gw != "" {
+				activeInterface = &iface
+				activeIP = ipv4.String()
+				activeGateway = gw
+				break
+			}
+
+			// Fallback: use first non-link-local interface
+			if activeInterface == nil {
+				activeInterface = &iface
+				activeIP = ipv4.String()
+			}
+		}
+
+		if activeGateway != "" {
+			break
+		}
+	}
+
+	if activeInterface != nil {
+		ip = activeIP
+		mac = activeInterface.HardwareAddr.String()
+		gateway = activeGateway
+	}
+
+	return ip, mac, gateway
+}
+
+// getDefaultGatewayForInterface gets the default gateway for a specific interface
+func getDefaultGatewayForInterface(ifIndex int) string {
+	cmd := exec.Command("wmic", "nicconfig", "where", fmt.Sprintf("Index=%d", ifIndex),
+		"get", "DefaultIPGateway", "/format:value")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "DefaultIPGateway=") {
+			gw := strings.TrimPrefix(line, "DefaultIPGateway=")
+			gw = strings.Trim(gw, "{}") // WMIC wraps in braces
+			gw = strings.TrimSpace(gw)
+			if gw != "" && gw != "0.0.0.0" {
+				return gw
+			}
+		}
+	}
+	return ""
+}
+
+// GetMACAddresses returns all non-loopback MAC addresses
+func GetMACAddresses() []string {
+	var macs []string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return macs
+	}
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		macStr := iface.HardwareAddr.String()
+		if macStr != "" && macStr != "00:00:00:00:00:00" {
+			macs = append(macs, macStr)
+		}
+	}
+
+	return macs
 }
