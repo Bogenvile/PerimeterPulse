@@ -5,10 +5,9 @@ import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
-import { RemoteTerminal } from "@/components/dashboard/RemoteTerminal";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, EthernetPort,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X, Terminal,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Network, Bug, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
@@ -381,22 +380,6 @@ const AssetDetailPage = () => {
           </Card>
         </div>
       </div>
-
-      {/* Remote Terminal */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 ring-1 ring-emerald-500/20">
-            <Terminal className="h-3.5 w-3.5 text-emerald-400" />
-          </div>
-          <h2 className="text-sm font-semibold text-foreground">Remote Terminal</h2>
-          <span className="text-[10px] text-muted-foreground">Admin only</span>
-        </div>
-        <RemoteTerminal
-          assetId={asset.id}
-          agentId={asset.agent_id}
-          hostname={asset.hostname}
-        />
-      </section>
 
       {/* Location */}
       <Card className="overflow-hidden border-white/[0.06] bg-white/[0.02] p-0">
