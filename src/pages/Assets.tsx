@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card } from "@/components/ui/card";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
-import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor } from "lucide-react";
+import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, MoreHorizontal } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAssets, deleteAsset, setApiToken } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";
@@ -90,145 +89,172 @@ const AssetsPage = () => {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+      <div className="flex h-full items-center justify-center p-8">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-blue-500/20 border-t-blue-500" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <AlertCircle className="h-10 w-10 text-red-500" />
-        <p className="text-sm text-red-500">{error}</p>
+      <div className="flex h-full flex-col items-center justify-center p-8 gap-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50">
+          <AlertCircle className="h-6 w-6 text-red-500" />
+        </div>
+        <p className="text-base font-semibold text-red-600">Connection Failed</p>
+        <p className="text-sm text-gray-500 max-w-xs text-center">{error}</p>
       </div>
     );
   }
 
   if (assets.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
-        <Monitor className="h-16 w-16 text-muted-foreground opacity-20" />
-        <p className="text-lg font-medium text-muted-foreground">No assets registered yet</p>
-        <p className="text-sm text-muted-foreground max-w-md text-center">
-          Deploy the agent on your PCs and they will register automatically.
-        </p>
+      <div className="flex h-full flex-col items-center justify-center p-8 gap-6">
+        <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-50">
+          <Monitor className="h-10 w-10 text-blue-500" />
+        </div>
+        <div className="text-center">
+          <p className="text-xl font-bold text-gray-900">No Assets Registered</p>
+          <p className="mt-2 text-sm text-gray-500 max-w-sm">
+            Deploy the agent on your PCs and they will register automatically.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="animate-fade-in space-y-5 p-4 md:p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="animate-fade-in p-6 md:p-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Assets</h1>
-          <p className="text-sm text-muted-foreground">
-            {filtered.length} of {assets.length} assets
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Assets</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage and monitor all registered devices
           </p>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search hostname, OS, WiFi, disk..."
-            className="w-full sm:w-56 rounded-lg border border-input bg-background py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search assets..."
+              className="w-full sm:w-64 rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 mb-6">
         {statusFilterOptions.map((opt) => (
           <button
             key={opt.value}
             onClick={() => setStatusFilter(opt.value)}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
               statusFilter === opt.value
-                ? "bg-blue-600/20 text-blue-600 dark:text-blue-400 border border-blue-500/30"
-                : "border border-border text-muted-foreground hover:text-foreground hover:border-foreground/20"
+                ? "bg-gray-900 text-white shadow-sm"
+                : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
             }`}
           >
             {opt.label}
           </button>
         ))}
+        <span className="ml-auto flex items-center text-xs text-gray-400">
+          {filtered.length} of {assets.length} assets
+        </span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {/* Grid */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.map((asset) => {
           const effectiveStatus = computeEffectiveStatus(asset);
           return (
-            <Card
+            <div
               key={asset.id}
-              className="group relative border-border bg-card p-4 shadow-sm transition-all hover:bg-muted/50 hover:border-foreground/10 hover:shadow-md"
+              className="group relative rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:shadow-md hover:border-blue-200"
             >
-              <div
-                className="cursor-pointer"
-                onClick={() => navigate(`/assets/${asset.id}`)}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-foreground">{asset.hostname}</p>
-                    <p className="text-xs text-muted-foreground">{asset.os} {asset.os_version}</p>
-                  </div>
-                  <AgentStatusBadge status={effectiveStatus} showLabel={false} />
+              <div className="flex items-start justify-between mb-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-gray-900">{asset.hostname}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{asset.os} {asset.os_version}</p>
                 </div>
-                <div className="space-y-1.5 text-xs text-muted-foreground">
-                  <div className="flex justify-between">
-                    <span>CPU</span>
-                    <span className="text-foreground">{asset.cpu_model.split(" ").slice(-1)[0]}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>RAM</span>
-                    <span className="text-foreground">{formatBytes(asset.ram_total_bytes)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Disk</span>
-                    <span className="text-foreground">
-                      {asset.disk_type}{" "}
-                      {asset.disk_health_status && asset.disk_health_status !== "ok" && `⚠ ${asset.disk_health_status}`}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>WiFi</span>
-                    <span className="text-foreground truncate ml-2 max-w-[100px]" title={asset.wifi_ssid}>
-                      {asset.wifi_ssid || "N/A"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>IP</span>
-                    <span className="text-foreground font-mono text-[10px]">
-                      {asset.ip_addresses?.[0] || "N/A"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Last seen</span>
-                    <span className="text-foreground">{formatLastSeen(asset.last_seen_at)}</span>
-                  </div>
+                <StatusIndicator status={effectiveStatus} />
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <DetailRow icon={<Cpu className="h-3.5 w-3.5 text-gray-400" />} label="CPU" value={asset.cpu_model.split(" ").slice(-1)[0]} />
+                <DetailRow icon={<Wifi className="h-3.5 w-3.5 text-gray-400" />} label="WiFi" value={asset.wifi_ssid || "N/A"} />
+                <DetailRow icon={<Disc className="h-3.5 w-3.5 text-gray-400" />} label="Disk" value={`${asset.disk_type} ${asset.disk_health_status !== "ok" ? `⚠` : ""}`} />
+                <DetailRow icon={<MapPin className="h-3.5 w-3.5 text-gray-400" />} label="IP" value={asset.ip_addresses?.[0] || "N/A"} />
+              </div>
+
+              <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
+                <span className="text-[10px] font-medium text-gray-400">
+                  Last seen {formatLastSeen(asset.last_seen_at)}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => navigate(`/assets/${asset.id}`)}
+                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                  >
+                    View
+                    <ChevronRight className="h-3 w-3" />
+                  </button>
+                  {isAdmin && (
+                    <DeleteAssetDialog
+                      hostname={asset.hostname}
+                      onConfirm={() => handleDelete(asset)}
+                      trigger={
+                        <button className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      }
+                    />
+                  )}
                 </div>
               </div>
-              {/* Delete button - admin only, show on hover */}
-              {isAdmin && (
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <DeleteAssetDialog
-                    hostname={asset.hostname}
-                    onConfirm={() => handleDelete(asset)}
-                  />
-                </div>
-              )}
-            </Card>
+            </div>
           );
         })}
       </div>
 
       {filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <div className="flex flex-col items-center justify-center py-16 text-gray-400">
           <SlidersHorizontal className="mb-3 h-8 w-8 opacity-40" />
-          <p className="text-sm">No assets match your filters</p>
+          <p className="text-sm font-medium">No assets match your filters</p>
         </div>
       )}
     </div>
   );
 };
+
+function StatusIndicator({ status }: { status: AgentStatus }) {
+  const styles: Record<AgentStatus, string> = {
+    online: "bg-emerald-50 text-emerald-600",
+    offline: "bg-gray-100 text-gray-500",
+    warning: "bg-amber-50 text-amber-600",
+    critical: "bg-red-50 text-red-600",
+  };
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${styles[status]}`}>
+      {status}
+    </span>
+  );
+}
+
+function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="text-gray-500">{label}</span>
+      </div>
+      <span className="font-medium text-gray-900 truncate ml-2 max-w-[100px]">{value}</span>
+    </div>
+  );
+}
 
 export default AssetsPage;
