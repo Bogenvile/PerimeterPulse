@@ -2,7 +2,6 @@ package collector
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -52,7 +51,6 @@ type MetricsData struct {
 	DiskTemperatureC  int     `json:"disk_temperature_c"`
 	Timestamp         string  `json:"timestamp"`
 
-	// Network diagnostics
 	GatewayReachable  bool   `json:"gateway_reachable"`
 	DNSWorking        bool   `json:"dns_working"`
 	InternetReachable bool   `json:"internet_reachable"`
@@ -138,7 +136,6 @@ func CollectMetrics() MetricsData {
 		netStatus = "degraded"
 	}
 
-	// Network diagnostics
 	wifiInfo := GetWiFiInfo()
 	gatewayReachable := isGatewayReachable(wifiInfo.Gateway)
 	dnsWorking := isDNWorking()
@@ -188,7 +185,6 @@ func CollectNetwork() NetworkInfoData {
 	wifiInfo := GetWiFiInfo()
 	ipList := getLocalIPs()
 
-	// Prioritaskan IP dari WiFi info, fallback ke list
 	wifiIP := wifiInfo.IP
 	if wifiIP == "" && len(ipList) > 0 {
 		wifiIP = ipList[0]
@@ -504,7 +500,6 @@ func getLocationLinux() (float64, float64, int, string) {
 	return getLocationWindows()
 }
 
-// HTTP client with timeout
 func httpGet(url string, timeout time.Duration) (string, error) {
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(url)
