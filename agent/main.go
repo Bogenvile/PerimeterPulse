@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"log"
-	"runtime"
 	"time"
 
 	"perimeterpulse/agent/client"
@@ -52,7 +51,7 @@ func main() {
 				WiFiSignalDBM:    wifiSignal,
 				WiFiIP:           wifiIP,
 				IPAddresses:      ips,
-				NetworkSpeedMbps: 0, // Could be added later
+				NetworkSpeedMbps: 0,
 			},
 		}
 

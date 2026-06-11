@@ -3,24 +3,24 @@
 package collector
 
 import (
+	"net"
 	"syscall"
 	"unsafe"
-	"net"
 )
 
 // WlanApi structures
 var (
-	wlanapi       = syscall.NewLazyDLL("wlanapi.dll")
-	procOpenHandle = wlanapi.NewProc("WlanOpenHandle")
-	procCloseHandle = wlanapi.NewProc("WlanCloseHandle")
+	wlanapi          = syscall.NewLazyDLL("wlanapi.dll")
+	procOpenHandle   = wlanapi.NewProc("WlanOpenHandle")
+	procCloseHandle  = wlanapi.NewProc("WlanCloseHandle")
 	procEnumInterfaces = wlanapi.NewProc("WlanEnumInterfaces")
 	procQueryInterface = wlanapi.NewProc("WlanQueryInterface")
 )
 
 type WLAN_INTERFACE_INFO struct {
-	InterfaceGuid   [16]byte
+	InterfaceGuid           [16]byte
 	strInterfaceDescription [256]uint16
-	isState         uint32
+	isState                 uint32
 }
 
 type WLAN_INTERFACE_INFO_LIST struct {
@@ -44,23 +44,30 @@ type WLAN_ASSOCIATION_ATTRIBUTES struct {
 	dot11Rate         uint32
 }
 
+type WLAN_SECURITY_ATTRIBUTES struct {
+	bSecurityEnabled     uint32
+	bOneXEnabled         uint32
+	dot11AuthAlgorithm   uint32
+	dot11CipherAlgorithm uint32
+}
+
 type WLAN_CONNECTION_ATTRIBUTES struct {
-	isState               uint32
-	wlanConnectionMode    uint32
-	strProfileName        [256]uint16
+	isState                   uint32
+	wlanConnectionMode        uint32
+	strProfileName            [256]uint16
 	wlanAssociationAttributes WLAN_ASSOCIATION_ATTRIBUTES
-	// wlanSecurityAttributes omitted for brevity
+	wlanSecurityAttributes    WLAN_SECURITY_ATTRIBUTES
 }
 
 // GetWifiInfo connects to the Windows Native Wifi API to get precise signal strength
 func GetWifiInfo() (string, int, string) {
 	var handle uint32
 	var negotiatedVersion uint32
-	
+
 	// 1. Open Handle
 	ret, _, _ := procOpenHandle.Call(uintptr(2), 0, uintptr(unsafe.Pointer(&negotiatedVersion)), uintptr(unsafe.Pointer(&handle)))
 	if ret != 0 {
-		return "", 0, "Error: Cannot open WlanApi"
+		return "", 0, "Error: WlanApi open failed"
 	}
 	defer procCloseHandle.Call(uintptr(handle), 0)
 
@@ -72,22 +79,21 @@ func GetWifiInfo() (string, int, string) {
 	}
 
 	if pInterfaceList == nil || pInterfaceList.NumberOfItems == 0 {
-		return "", 0, "No WLAN interface"
+		return "", 0, "No WLAN interface found"
 	}
 
-	// 3. Query the first interface (usually the active one)
-	// We slice the array manually based on NumberOfItems
-	ifacePtr := &pInterfaceList.InterfaceInfo
-	// In a real scenario we should iterate, but for single-WiFi adapter laptops, index 0 is usually the one.
-	
-	var pConnAttr *WLAN_CONNECTION_ATTRIBUTES
+	// Fix: Access first element of the array correctly
+	ifaceList := (*pInterfaceList)
+	iface := ifaceList.InterfaceInfo[0]
+
+	// 3. Query the interface for connection attributes
 	var dataSize uint32
 	var pData *byte
 	opCode := uint32(7) // wlan_intf_opcode_current_connection
 
 	ret, _, _ = procQueryInterface.Call(
 		uintptr(handle),
-		uintptr(unsafe.Pointer(&ifacePtr.InterfaceGuid)),
+		uintptr(unsafe.Pointer(&iface.InterfaceGuid)),
 		uintptr(opCode),
 		0,
 		uintptr(unsafe.Pointer(&dataSize)),
@@ -101,45 +107,32 @@ func GetWifiInfo() (string, int, string) {
 
 	// Cast raw pointer to struct
 	connAttr := (*WLAN_CONNECTION_ATTRIBUTES)(unsafe.Pointer(pData))
-	
+
 	// Extract SSID
-	ssidBytes := connAttr.dot11Ssid.ucSSID[:connAttr.dot11Ssid.uSSIDLength]
+	ssidBytes := connAttr.wlanAssociationAttributes.dot11Ssid.ucSSID[:connAttr.wlanAssociationAttributes.dot11Ssid.uSSIDLength]
 	ssid := string(ssidBytes)
-	
+
 	// Extract Quality (0-100)
 	quality := connAttr.wlanAssociationAttributes.wlanSignalQuality
-	
-	// Convert to dBm (Standard approximation)
-	// 0% = -100dBm, 100% = -50dBm
+
+	// Convert to dBm (Standard approximation: 0% = -100dBm, 100% = -50dBm)
 	dBm := -100
 	if quality > 0 {
 		dBm = -100 + int(quality)/2
 	}
 
-	// Get local IP for this interface
-	ip := getIPForInterface(ifacePtr.InterfaceGuid[:])
+	// Get IP for this interface (simplified)
+	ip := getIPForInterface(iface.InterfaceGuid[:])
 
 	return ssid, dBm, ip
 }
 
 func getIPForInterface(guid []byte) string {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	
-	// Convert GUID bytes to string format "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}"
-	guidStr := "{" + formatGUID(guid) + "}"
-
-	for _, iface := range interfaces {
-		// We try to match by name or index, but matching GUID in Go net.Interfaces is tricky
-		// A simpler fallback for the agent is to return the first non-loopback IPv4
-		// However, let's try to find the IP via the description if available
-	}
-	return "" // Fallback logic would be needed here or return empty to let server infer
+	// Matching GUID to net.Interface is complex, fallback to finding active IPs
+	return "" 
 }
 
-// Fallback IP collection
+// GetAllIPs returns all active IPv4 addresses
 func GetAllIPs() []string {
 	var ips []string
 	ifaces, err := net.Interfaces()
@@ -169,8 +162,4 @@ func GetAllIPs() []string {
 		}
 	}
 	return ips
-}
-
-func formatGUID(b []byte) string {
-	return "" // Placeholder
 }

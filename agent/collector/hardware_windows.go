@@ -4,16 +4,29 @@ package collector
 
 import (
 	"fmt"
-	"syscall"
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
+	"syscall"
 )
+
+// MEMORYSTATUSEX structure for GlobalMemoryStatusEx
+type MEMORYSTATUSEX struct {
+	Length               uint32
+	MemoryLoad           uint32
+	TotalPhys            uint64
+	AvailPhys            uint64
+	TotalPageFile        uint64
+	AvailPageFile        uint64
+	TotalVirtual         uint64
+	AvailVirtual         uint64
+	AvailExtendedVirtual uint64
+}
 
 // GetHardwareInfo returns detailed hardware info for Windows
 func GetHardwareInfo() HardwareInfo {
-	info := HardwareInfo{
+	return HardwareInfo{
 		CPUModel:  getCPUModel(),
 		CPUCores:  getCPUCores(),
 		RAMTotal:  getRAMTotal(),
@@ -22,7 +35,6 @@ func GetHardwareInfo() HardwareInfo {
 		DiskSize:  getPhysicalDiskSize(),
 		OS:        "Windows",
 	}
-	return info
 }
 
 func getCPUModel() string {
@@ -82,27 +94,68 @@ func getCPUModel() string {
 }
 
 func getCPUCores() int {
-	// Simplified core count retrieval
-	return 0 // Will be filled by runtime.NumCPU() in main usually, or query NumberOfCores
+	err := ole.CoInitialize(0)
+	if err != nil {
+		return 0
+	}
+	defer ole.CoUninitialize()
+
+	unknown, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
+	if err != nil {
+		return 0
+	}
+	defer unknown.Release()
+
+	wmi, err := unknown.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		return 0
+	}
+	defer wmi.Release()
+
+	serviceRaw, err := oleutil.CallMethod(wmi, "ConnectServer", nil, `root\cimv2`)
+	if err != nil {
+		return 0
+	}
+	service := serviceRaw.ToIDispatch()
+	defer service.Release()
+
+	resultRaw, err := oleutil.CallMethod(service, "ExecQuery", "SELECT NumberOfCores FROM Win32_Processor")
+	if err != nil {
+		return 0
+	}
+	result := resultRaw.ToIDispatch()
+	defer result.Release()
+
+	countVar, err := oleutil.GetProperty(result, "Count")
+	if err != nil || countVar.Val == 0 {
+		return 0
+	}
+
+	itemRaw, err := oleutil.CallMethod(result, "ItemIndex", 0)
+	if err != nil {
+		return 0
+	}
+	item := itemRaw.ToIDispatch()
+	defer item.Release()
+
+	coresVar, err := oleutil.GetProperty(item, "NumberOfCores")
+	if err != nil {
+		return 0
+	}
+	return int(coresVar.Val)
 }
 
 func getRAMTotal() uint64 {
-	var status uint32
-	var memInfo syscall.MemoryStatusEx
-	memInfo.Length = uint32(unsafe.Sizeof(memInfo))
-	
-	// GlobalMemoryStatusEx is available in kernel32
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	proc := kernel32.NewProc("GlobalMemoryStatusEx")
-	
-	// Call via syscall
+
+	var memInfo MEMORYSTATUSEX
+	memInfo.Length = uint32(unsafe.Sizeof(memInfo))
+
 	r1, _, _ := proc.Call(uintptr(unsafe.Pointer(&memInfo)))
 	if r1 == 0 {
 		return 0
 	}
-	
-	status = 0 // unused
-	_ = status
 	return memInfo.TotalPhys
 }
 
@@ -132,7 +185,7 @@ func getPhysicalDiskModel() string {
 	service := serviceRaw.ToIDispatch()
 	defer service.Release()
 
-	resultRaw, err := oleutil.CallMethod(service, "ExecQuery", "SELECT Model, MediaType, Size FROM Win32_DiskDrive")
+	resultRaw, err := oleutil.CallMethod(service, "ExecQuery", "SELECT Model FROM Win32_DiskDrive")
 	if err != nil {
 		return ""
 	}
@@ -144,7 +197,6 @@ func getPhysicalDiskModel() string {
 		return ""
 	}
 
-	// Get first disk
 	itemRaw, err := oleutil.CallMethod(result, "ItemIndex", 0)
 	if err != nil {
 		return ""
@@ -208,8 +260,7 @@ func getPhysicalDiskSize() uint64 {
 	if err != nil {
 		return 0
 	}
-	
-	// WMI returns size as string
+
 	sizeStr := sizeVar.ToString()
 	var size uint64
 	fmt.Sscanf(sizeStr, "%d", &size)
@@ -242,7 +293,7 @@ func detectDiskType() string {
 	service := serviceRaw.ToIDispatch()
 	defer service.Release()
 
-	resultRaw, err := oleutil.CallMethod(service, "ExecQuery", "SELECT MediaType FROM Win32_DiskDrive")
+	resultRaw, err := oleutil.CallMethod(service, "ExecQuery", "SELECT MediaType, Model FROM Win32_DiskDrive")
 	if err != nil {
 		return "Unknown"
 	}
@@ -265,19 +316,18 @@ func detectDiskType() string {
 	if err != nil {
 		return "Unknown"
 	}
-	
-	media := mediaVar.ToString()
-	// Win32_DiskDrive MediaType is often fixed for SSDs/HDDs but might be empty
-	if media == "" {
-		// Fallback check model for SSD keywords
-		modelVar, _ := oleutil.GetProperty(item, "Model")
-		model := modelVar.ToString()
-		if containsAny(model, "SSD", "NVMe", "Solid") {
-			return "SSD"
-		}
-		return "HDD"
+
+	modelVar, err := oleutil.GetProperty(item, "Model")
+	if err != nil {
+		return "Unknown"
 	}
-	
+
+	media := mediaVar.ToString()
+	model := modelVar.ToString()
+
+	if containsAny(model, "SSD", "NVMe", "Solid", "M.2") {
+		return "SSD"
+	}
 	if containsAny(media, "SSD", "Solid") {
 		return "SSD"
 	}
@@ -286,11 +336,9 @@ func detectDiskType() string {
 
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
-		if len(s) >= len(sub) {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
 			}
 		}
 	}
