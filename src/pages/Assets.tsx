@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { AgentStatusBadge } from "@/components/dashboard/AgentStatusBadge";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
-import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, MoreHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal, Loader2, AlertCircle, Monitor, Wifi, Disc, Cpu, MapPin, ChevronRight, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAssets, deleteAsset, setApiToken } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";
@@ -200,7 +200,7 @@ const AssetsPage = () => {
                 <span className="text-[10px] font-medium text-gray-400">
                   Last seen {formatLastSeen(asset.last_seen_at)}
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => navigate(`/assets/${asset.id}`)}
                     className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
@@ -213,8 +213,12 @@ const AssetsPage = () => {
                       hostname={asset.hostname}
                       onConfirm={() => handleDelete(asset)}
                       trigger={
-                        <button className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors">
-                          <MoreHorizontal className="h-4 w-4" />
+                        <button
+                          disabled={deletingId === asset.id}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                          title="Delete asset"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       }
                     />
