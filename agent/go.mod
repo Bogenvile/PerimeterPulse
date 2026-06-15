@@ -2,10 +2,7 @@ module perimeterpulse-agent
 
 go 1.21
 
-require (
-	github.com/shirou/gopsutil/v3 v3.24.5
-	github.com/shirou/gopsutil v3.21.11+incompatible
-)
+require github.com/shirou/gopsutil/v3 v3.24.5
 
 require (
 	github.com/go-ole/go-ole v1.2.6 // indirect

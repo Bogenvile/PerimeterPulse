@@ -1,184 +1,226 @@
+//go:build windows
+
 package collector
 
 import (
 	"fmt"
-	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 )
 
-// WiFiInfo holds WiFi network information
+// WiFiInfo holds wireless network details
 type WiFiInfo struct {
 	SSID      string
 	SignalDBM int
+	LinkSpeed float64
 	IP        string
-	MAC       string
 	Gateway   string
-	LinkSpeed int // Mbps
 }
 
-// GetWiFiInfo retrieves WiFi info using netsh wlan
+// GetWiFiInfo retrieves WiFi information using netsh on Windows
 func GetWiFiInfo() WiFiInfo {
-	var info WiFiInfo
-	info.SignalDBM = -999 // default: no signal
+	info := WiFiInfo{
+		SignalDBM: -999,
+	}
 
-	// Get connected WiFi interface info
+	// Get SSID and signal via netsh wlan show interfaces
 	cmd := exec.Command("netsh", "wlan", "show", "interfaces")
-	output, err := cmd.Output()
+	out, err := cmd.Output()
 	if err != nil {
 		return info
 	}
 
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "SSID") && strings.Contains(line, ":"):
-			parts := strings.SplitN(line, ":", 2)
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "SSID") && !strings.Contains(trimmed, "BSSID") {
+			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {
 				info.SSID = strings.TrimSpace(parts[1])
 			}
-		case strings.HasPrefix(line, "Signal") && strings.Contains(line, ":"):
-			parts := strings.SplitN(line, ":", 2)
+		}
+		if strings.HasPrefix(trimmed, "Signal") {
+			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {
-				signalStr := strings.TrimSuffix(strings.TrimSpace(parts[1]), "%")
+				signalStr := strings.TrimSpace(parts[1])
+				signalStr = strings.TrimRight(signalStr, "%")
+				signalStr = strings.TrimSpace(signalStr)
 				if pct, err := strconv.Atoi(signalStr); err == nil {
-					// Convert quality % to approximate dBm
-					// Typical: 100% ≈ -30 dBm, 0% ≈ -90 dBm
-					info.SignalDBM = -90 + (pct * 60 / 100)
+					if pct >= 100 {
+						info.SignalDBM = -30
+					} else if pct <= 0 {
+						info.SignalDBM = -90
+					} else {
+						info.SignalDBM = -90 + (pct * 60 / 100)
+					}
 				}
 			}
-		case strings.HasPrefix(line, "Receive rate") || strings.HasPrefix(line, "Transmit rate"):
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 && info.LinkSpeed == 0 {
+		}
+		if strings.Contains(trimmed, "Receive rate") || strings.Contains(trimmed, "Transmit rate") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
 				rateStr := strings.TrimSpace(parts[1])
 				rateStr = strings.TrimSuffix(rateStr, "Mbps")
 				rateStr = strings.TrimSpace(rateStr)
-				if rate, err := strconv.Atoi(rateStr); err == nil {
+				if rate, err := strconv.ParseFloat(rateStr, 64); err == nil && rate > 0 {
 					info.LinkSpeed = rate
 				}
 			}
 		}
 	}
 
-	// Get IP, MAC, Gateway from active interface
-	info.IP, info.MAC, info.Gateway = getActiveNetworkInfo()
+	// Get IP and Gateway via netsh interface ip show config
+	cmd2 := exec.Command("netsh", "interface", "ip", "show", "config")
+	out2, err := cmd2.Output()
+	if err != nil {
+		return info
+	}
+
+	lines2 := strings.Split(string(out2), "\n")
+	for _, line := range lines2 {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "IP Address") && !strings.Contains(trimmed, "Subnet") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				ip := strings.TrimSpace(parts[1])
+				if ip != "" && info.IP == "" {
+					info.IP = ip
+				}
+			}
+		}
+		if strings.HasPrefix(trimmed, "Default Gateway") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				gw := strings.TrimSpace(parts[1])
+				if gw != "" && info.Gateway == "" {
+					info.Gateway = gw
+				}
+			}
+		}
+	}
 
 	return info
 }
 
-// getActiveNetworkInfo finds the IP, MAC, and gateway of the active network interface
-func getActiveNetworkInfo() (ip string, mac string, gateway string) {
-	// Get list of network interfaces
-	interfaces, err := net.Interfaces()
+// GetDiskModel returns the disk model via PowerShell
+func GetDiskModel() string {
+	cmd := exec.Command("powershell", "-Command",
+		"Get-PhysicalDisk | Select-Object -ExpandProperty FriendlyName | Select-Object -First 1")
+	out, err := cmd.Output()
 	if err != nil {
-		return "", "", ""
+		return "Unknown"
 	}
+	return strings.TrimSpace(string(out))
+}
 
-	var activeInterface *net.Interface
-	var activeIP string
-	var activeGateway string
-
-	for _, iface := range interfaces {
-		// Skip loopback and down interfaces
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
+// DetectDiskType returns disk type (SSD, HDD, NVMe, unknown)
+func DetectDiskType() string {
+	cmd := exec.Command("powershell", "-Command",
+		"Get-PhysicalDisk | Select-Object -ExpandProperty MediaType | Select-Object -First 1")
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	mediaType := strings.TrimSpace(string(out))
+	switch mediaType {
+	case "SSD":
+		return "SSD"
+	case "HDD":
+		return "HDD"
+	case "SCM":
+		return "NVMe"
+	default:
+		model := GetDiskModel()
+		if strings.Contains(strings.ToUpper(model), "NVME") {
+			return "NVMe"
 		}
-		if iface.Flags&net.FlagUp == 0 {
-			continue
-		}
+		return "unknown"
+	}
+}
 
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok {
-				continue
-			}
-
-			ipv4 := ipNet.IP.To4()
-			if ipv4 == nil || ipv4.IsLoopback() || ipv4.IsLinkLocalUnicast() {
-				continue
-			}
-
-			// Check if this interface has a default gateway
-			gw := getDefaultGatewayForInterface(iface.Index)
-			if gw != "" {
-				activeInterface = &iface
-				activeIP = ipv4.String()
-				activeGateway = gw
+// GetDiskUsage returns total and used bytes for C: drive
+func GetDiskUsage() (totalBytes uint64, usedBytes uint64) {
+	cmd := exec.Command("powershell", "-Command",
+		"Get-PSDrive C | Select-Object Used, @{Name='Total';Expression={$_.Used + $_.Free}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	lines := strings.Split(string(out), "\n")
+	var used, total float64
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			u, e1 := strconv.ParseFloat(fields[0], 64)
+			t, e2 := strconv.ParseFloat(fields[1], 64)
+			if e1 == nil && e2 == nil {
+				used = u
+				total = t
 				break
 			}
-
-			// Fallback: use first non-link-local interface
-			if activeInterface == nil {
-				activeInterface = &iface
-				activeIP = ipv4.String()
-			}
 		}
+	}
+	return uint64(total), uint64(used)
+}
 
-		if activeGateway != "" {
+// detectCPU returns CPU model and core count via PowerShell
+func detectCPU() (model string, cores int) {
+	cmd := exec.Command("powershell", "-Command",
+		"Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores")
+	out, err := cmd.Output()
+	if err != nil {
+		return "Unknown", 1
+	}
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Name") && strings.Contains(line, "NumberOfCores") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			model = strings.Join(parts[:len(parts)-1], " ")
+			coresStr := parts[len(parts)-1]
+			if c, err := strconv.Atoi(coresStr); err == nil {
+				cores = c
+			}
 			break
 		}
 	}
-
-	if activeInterface != nil {
-		ip = activeIP
-		mac = activeInterface.HardwareAddr.String()
-		gateway = activeGateway
+	if model == "" {
+		model = "Unknown"
 	}
-
-	return ip, mac, gateway
+	if cores == 0 {
+		cores = 1
+	}
+	return
 }
 
-// getDefaultGatewayForInterface gets the default gateway for a specific interface
-func getDefaultGatewayForInterface(ifIndex int) string {
-	cmd := exec.Command("wmic", "nicconfig", "where", fmt.Sprintf("Index=%d", ifIndex),
-		"get", "DefaultIPGateway", "/format:value")
-	output, err := cmd.Output()
+// getTotalRAM returns total RAM via PowerShell
+func getTotalRAM() uint64 {
+	cmd := exec.Command("powershell", "-Command",
+		"(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory")
+	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return 0
 	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "DefaultIPGateway=") {
-			gw := strings.TrimPrefix(line, "DefaultIPGateway=")
-			gw = strings.Trim(gw, "{}") // WMIC wraps in braces
-			gw = strings.TrimSpace(gw)
-			if gw != "" && gw != "0.0.0.0" {
-				return gw
-			}
-		}
+	val, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0
 	}
-	return ""
+	return val
 }
 
-// GetMACAddresses returns all non-loopback MAC addresses
-func GetMACAddresses() []string {
-	var macs []string
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return macs
-	}
-
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		macStr := iface.HardwareAddr.String()
-		if macStr != "" && macStr != "00:00:00:00:00:00" {
-			macs = append(macs, macStr)
-		}
-	}
-
-	return macs
+// getUsedRAM returns used RAM via GlobalMemoryStatusEx kernel32 call
+func getUsedRAM() uint64 {
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	globalMemoryStatusEx := kernel32.NewProc("GlobalMemoryStatusEx")
+	var memStatus [64]byte
+	memStatus[0] = 64 // dwLength
+	globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&memStatus[0])))
+	totalPhys := *(*uint64)(unsafe.Pointer(&memStatus[8]))
+	availPhys := *(*uint64)(unsafe.Pointer(&memStatus[16]))
+	return totalPhys - availPhys
 }
