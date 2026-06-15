@@ -75,6 +75,15 @@ func GetDiskHealth() (status string, temperatureC float64) {
 	return "unknown", 0
 }
 
+// GetSystemUptime returns system uptime in seconds
+func GetSystemUptime() (uint64, error) {
+	uptime, err := host.Uptime()
+	if err != nil {
+		return 0, err
+	}
+	return uptime, nil
+}
+
 // CollectNetworkInfo gathers network information
 func CollectNetworkInfo() NetworkInfoResult {
 	wifi := GetWiFiInfo()

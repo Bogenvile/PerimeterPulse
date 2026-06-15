@@ -6,6 +6,9 @@ type LocationData struct {
 	Longitude      float64 `json:"longitude"`
 	AccuracyMeters float64 `json:"accuracy_meters"`
 	Source         string  `json:"source"`
+	City           string  `json:"city"`
+	Country        string  `json:"country"`
+	Timestamp      string  `json:"timestamp"`
 }
 
 // GetLocation retrieves the current location (platform specific)

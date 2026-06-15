@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -16,13 +15,13 @@ import (
 )
 
 var (
-	serverURL  = flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
-	apiKey     = flag.String("apikey", "", "API key for authentication")
-	hostname   = flag.String("hostname", "", "Override hostname")
-	interval   = flag.Int("interval", 60, "Heartbeat interval in seconds")
-	version    = "1.0.0"
-	agentID    string
-	startTime  time.Time
+	serverURL = flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
+	apiKey    = flag.String("apikey", "", "API key for authentication")
+	hostname  = flag.String("hostname", "", "Override hostname")
+	interval  = flag.Int("interval", 60, "Heartbeat interval in seconds")
+	version   = "1.0.0"
+	agentID   string
+	startTime time.Time
 )
 
 func init() {
@@ -64,9 +63,14 @@ func main() {
 		log.Printf("⚠️  Registration warning: %v", err)
 	}
 
-	// Start command executor
-	cmdExecutor := commands.NewExecutor(apiClient, agentID)
-	go cmdExecutor.Start()
+	// Start command polling in background
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			commands.ProcessCommands(*serverURL, agentID, *apiKey)
+		}
+	}()
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -120,13 +124,13 @@ func sendHeartbeat(apiClient *client.Client, hostname string) {
 
 	// Collect location - HANYA jika valid
 	var location *collector.LocationData
-	loc, err := collector.CollectLocation()
-	if err != nil {
-		log.Printf("📍 Location: not available (%v)", err)
-	} else if loc != nil {
-		location = loc
+	loc := collector.GetLocation()
+	if loc.Latitude != 0 || loc.Longitude != 0 {
+		location = &loc
 		log.Printf("📍 Location: %.4f, %.4f (source: %s, accuracy: %.0fm)",
 			loc.Latitude, loc.Longitude, loc.Source, loc.AccuracyMeters)
+	} else {
+		log.Printf("📍 Location: not available")
 	}
 
 	// Collect disk health (SMART)
@@ -162,12 +166,12 @@ func sendHeartbeat(apiClient *client.Client, hostname string) {
 			Timestamp:          time.Now().UTC().Format(time.RFC3339),
 		},
 		NetworkInfo: client.NetworkInfoData{
-			WiFiSSID:        networkInfo.WiFiSSID,
-			WiFiSignalDBM:   networkInfo.WiFiSignalDBM,
+			WiFiSSID:         networkInfo.WiFiSSID,
+			WiFiSignalDBM:    networkInfo.WiFiSignalDBM,
 			NetworkSpeedMbps: networkInfo.NetworkSpeedMbps,
-			IPAddresses:     networkInfo.IPAddresses,
-			WiFiIP:          networkInfo.WiFiIP,
-			GatewayIP:       networkInfo.GatewayIP,
+			IPAddresses:      networkInfo.IPAddresses,
+			WiFiIP:           networkInfo.WiFiIP,
+			GatewayIP:        networkInfo.GatewayIP,
 		},
 	}
 
@@ -188,7 +192,7 @@ func sendHeartbeat(apiClient *client.Client, hostname string) {
 	}
 
 	// Send heartbeat
-	resp, err := apiClient.Heartbeat(&payload)
+	_, err = apiClient.Heartbeat(&payload)
 	if err != nil {
 		log.Printf("❌ Heartbeat failed: %v", err)
 		return
@@ -196,14 +200,6 @@ func sendHeartbeat(apiClient *client.Client, hostname string) {
 
 	log.Printf("✅ Heartbeat sent (CPU: %.1f%%, RAM: %.1f%%, Disk: %s, Net: %s)",
 		cpuPercent, ramPercent, diskHealth, diag.Status)
-
-	if resp != nil {
-		// Check for auto-update
-		if resp.UpdateAvailable && resp.UpdateVersion != "" {
-			log.Printf("🔄 Update available: %s", resp.UpdateVersion)
-			go apiClient.DownloadAndApplyUpdate(resp.UpdateVersion, resp.UpdateURL)
-		}
-	}
 }
 
 // Export fungsi untuk digunakan oleh collector
