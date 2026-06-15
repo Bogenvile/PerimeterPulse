@@ -1,21 +1,8 @@
+import "@/lib/leaflet-polyfill"; // MUST be first — patches window.frameElement before Leaflet reads it
 import { useEffect, useRef, useCallback, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { AgentStatus } from "@/lib/types";
-
-// Fix: Leaflet dalam iframe mencoba akses window.frameElement
-// yang tidak tersedia di beberapa environment.
-// Polyfill untuk mencegah error "Cannot read properties of undefined (reading 'frame')"
-if (typeof window !== "undefined" && !window.frameElement && window.parent) {
-  try {
-    Object.defineProperty(window, "frameElement", {
-      get: () => null,
-      configurable: true,
-    });
-  } catch {
-    // ignore if not configurable
-  }
-}
 
 interface MappableAsset {
   id: string;
