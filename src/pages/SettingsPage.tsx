@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { getAppSettings, updateAppSettings, setApiToken } from "@/lib/api";
 import { showSuccess, showError } from "@/utils/toast";
-import { Save, Loader2, ShieldCheck, Key, Bot, Mail, MessageCircle } from "lucide-react";
+import { Save, Loader2, ShieldCheck, Key, Bot, Mail, MessageCircle, Globe, Cpu } from "lucide-react";
 
 export default function SettingsPage() {
   const { token, isAdmin } = useAuth();
@@ -15,7 +15,13 @@ export default function SettingsPage() {
     setApiToken(token);
     setLoading(true);
     getAppSettings()
-      .then(setSettings)
+      .then((s) => {
+        // Migrate old openai_api_key to ai_api_key if needed
+        if (s.openai_api_key && !s.ai_api_key) {
+          s.ai_api_key = s.openai_api_key;
+        }
+        setSettings(s);
+      })
       .catch(() => showError("Failed to load settings"))
       .finally(() => setLoading(false));
   }, [token, isAdmin]);
@@ -27,7 +33,14 @@ export default function SettingsPage() {
   async function handleSave() {
     setSaving(true);
     try {
-      await updateAppSettings(settings);
+      // Save all fields including the new ai_* keys
+      const toSave: Record<string, string> = {};
+      for (const [key, value] of Object.entries(settings)) {
+        // Skip legacy key to avoid confusion
+        if (key === "openai_api_key") continue;
+        toSave[key] = value;
+      }
+      await updateAppSettings(toSave);
       showSuccess("Settings saved");
     } catch (err) {
       showError(err instanceof Error ? err.message : "Failed to save");
@@ -61,6 +74,9 @@ export default function SettingsPage() {
     { cmd: "/cmd <hostname> <command>", desc: "" },
   ];
 
+  const defaultBaseUrl = "https://api.minimax.chat/v1";
+  const defaultModel = "MiniMax-Text-01";
+
   return (
     <div className="animate-fade-in space-y-6 p-6 md:p-8 max-w-3xl">
       <div className="flex items-center justify-between">
@@ -79,17 +95,51 @@ export default function SettingsPage() {
       </div>
 
       {/* AI */}
-      <Section icon={<Bot className="h-4 w-4" />} title="AI Assistant (OpenAI)">
-        <FormInput
-          label="OpenAI API Key"
-          type="password"
-          value={settings.openai_api_key || ""}
-          onChange={(v) => updateField("openai_api_key", v)}
-          placeholder="sk-..."
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          Required for the AI Chat Assistant feature. Uses GPT-4o-mini.
-        </p>
+      <Section icon={<Bot className="h-4 w-4" />} title="AI Assistant">
+        <div className="space-y-4">
+          <div className="rounded-lg border border-primary/20 bg-primary/[0.03] p-4">
+            <p className="text-xs font-semibold text-primary mb-2">Custom AI Provider</p>
+            <p className="text-xs text-muted-foreground">
+              Supports any OpenAI-compatible API (MiniMax, DeepSeek, Groq, Together AI, Ollama, etc).
+              The endpoint must support <code className="bg-muted px-1 py-0.5 rounded font-mono">/chat/completions</code> format.
+            </p>
+          </div>
+
+          <FormInput
+            label="API Base URL"
+            value={settings.ai_base_url || ""}
+            onChange={(v) => updateField("ai_base_url", v)}
+            placeholder={defaultBaseUrl}
+          />
+          <p className="text-xs text-muted-foreground -mt-2">
+            Examples: <code className="bg-muted px-1 py-0.5 rounded font-mono">https://api.minimax.chat/v1</code>,{" "}
+            <code className="bg-muted px-1 py-0.5 rounded font-mono">https://api.deepseek.com/v1</code>,{" "}
+            <code className="bg-muted px-1 py-0.5 rounded font-mono">http://localhost:11434/v1</code>
+          </p>
+
+          <FormInput
+            label="Model Name"
+            value={settings.ai_model || ""}
+            onChange={(v) => updateField("ai_model", v)}
+            placeholder={defaultModel}
+          />
+          <p className="text-xs text-muted-foreground -mt-2">
+            Examples: <code className="bg-muted px-1 py-0.5 rounded font-mono">MiniMax-Text-01</code>,{" "}
+            <code className="bg-muted px-1 py-0.5 rounded font-mono">deepseek-chat</code>,{" "}
+            <code className="bg-muted px-1 py-0.5 rounded font-mono">llama3</code>
+          </p>
+
+          <FormInput
+            label="API Key"
+            type="password"
+            value={settings.ai_api_key || ""}
+            onChange={(v) => updateField("ai_api_key", v)}
+            placeholder="Your API key..."
+          />
+          <p className="text-xs text-muted-foreground -mt-2">
+            Required. Will be sent as Bearer token in the Authorization header.
+          </p>
+        </div>
       </Section>
 
       {/* Telegram */}
@@ -146,7 +196,7 @@ export default function SettingsPage() {
             type="password"
             value={settings.smtp_pass || ""}
             onChange={(v) => updateField("smtp_pass", v)}
-            placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+            placeholder="••••••••"
           />
           <FormInput
             label="From Address"

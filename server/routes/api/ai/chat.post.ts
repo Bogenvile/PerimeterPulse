@@ -11,10 +11,13 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "message required" });
   }
 
-  const apiKey = await getSetting("openai_api_key");
+  const apiKey = await getSetting("ai_api_key");
   if (!apiKey) {
-    throw createError({ statusCode: 500, statusMessage: "OpenAI API key not configured" });
+    throw createError({ statusCode: 500, statusMessage: "AI API key not configured. Set it in Settings → AI Assistant." });
   }
+
+  const baseUrl = (await getSetting("ai_base_url")) || "https://api.openai.com/v1";
+  const model = (await getSetting("ai_model")) || "gpt-4o-mini";
 
   const systemContext = await getAssetSummaryContext();
 
@@ -32,15 +35,19 @@ Key rules:
 - Highlight critical/warning statuses
 - Suggest actions if relevant`;
 
+  // Normalize base URL: remove trailing slash
+  const normalizedBase = baseUrl.replace(/\/+$/, "");
+  const endpoint = `${normalizedBase}/chat/completions`;
+
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: body.message },
@@ -52,13 +59,20 @@ Key rules:
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`OpenAI error: ${errText}`);
+      console.error(`AI provider error (${endpoint}):`, errText);
+      throw new Error(`AI provider error: ${response.status} ${errText.slice(0, 200)}`);
     }
 
     const data = await response.json() as { choices: { message: { content: string } }[] };
-    return { reply: data.choices[0].message.content };
+    const reply = data.choices?.[0]?.message?.content;
+    if (!reply) {
+      throw new Error("AI provider returned empty response");
+    }
+
+    return { reply };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("AI chat error:", msg);
     throw createError({ statusCode: 500, statusMessage: msg });
   }
 });
