@@ -1,4 +1,4 @@
-import { getSetting, query, queryOne, sendCommand as dbSendCommand } from "../db/mysql";
+import { getSetting, query, queryOne } from "../db/mysql";
 import { insertCommand, ensureAgentCommandsTable } from "../db/commands";
 
 let pollingInterval: ReturnType<typeof setInterval> | null = null;
@@ -115,3 +115,10 @@ export function stopTelegramBot() {
     pollingInterval = null;
   }
 }
+
+// Nitro plugin: hanya sebagai tempat mendaftarkan, bot dijalankan dari tempat lain
+export default {
+  async setup(_nitroApp: any) {
+    // Tidak melakukan apa-apa saat startup, bot dimulai setelah settings diupdate
+  }
+};
