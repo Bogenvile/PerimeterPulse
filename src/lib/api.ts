@@ -20,8 +20,9 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function getAssets() {
-  return fetchApi("/assets");
+export async function getAssets(tags?: string) {
+  const query = tags ? `?tags=${encodeURIComponent(tags)}` : "";
+  return fetchApi(`/assets${query}`);
 }
 
 export async function getAsset(id: string) {
@@ -110,4 +111,35 @@ export async function getAgentUpdates(): Promise<
   { filename: string; size: number; createdAt: string }[]
 > {
   return fetchApi("/updates");
+}
+
+// ──── Tags ────
+
+export async function updateAssetTags(assetId: string, tags: string[]): Promise<{ tags: string[] }> {
+  return fetchApi(`/assets/${assetId}/tags`, {
+    method: "PUT",
+    body: JSON.stringify({ tags }),
+  });
+}
+
+// ──── Settings ────
+
+export async function getAppSettings(): Promise<Record<string, string>> {
+  return fetchApi("/settings");
+}
+
+export async function updateAppSettings(settings: Record<string, string>): Promise<{ ok: boolean }> {
+  return fetchApi("/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+// ──── AI Chat ────
+
+export async function sendAiMessage(message: string): Promise<{ reply: string }> {
+  return fetchApi("/ai/chat", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
 }

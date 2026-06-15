@@ -51,8 +51,6 @@ export async function queryOne<T = Record<string, unknown>>(
   return rows.length > 0 ? rows[0] : null;
 }
 
-// ──── Password / API Key hashing (bcrypt) ────
-
 export function hashSecret(plain: string): string {
   return bcrypt.hashSync(plain, 10);
 }
@@ -60,8 +58,6 @@ export function hashSecret(plain: string): string {
 export function verifySecret(plain: string, hash: string): boolean {
   return bcrypt.compareSync(plain, hash);
 }
-
-// ──── JSON helpers for array columns ────
 
 export function parseJsonArray(val: unknown): string[] {
   if (!val) return [];
@@ -75,6 +71,82 @@ export function parseJsonArray(val: unknown): string[] {
     }
   }
   return [];
+}
+
+// ──── Tags helpers ────
+
+export function parseTagsArray(val: unknown): string[] {
+  return parseJsonArray(val);
+}
+
+export function tagsToJson(tags: string[]): string {
+  return JSON.stringify(tags.filter((t) => t.trim().length > 0));
+}
+
+// ──── Auto-migration v6 ────
+
+export async function ensureV6Schema(): Promise<void> {
+  try {
+    // 1. Tags column
+    const hasTagsCol = await queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'assets' AND COLUMN_NAME = 'tags'`,
+    );
+    if (!hasTagsCol || hasTagsCol.count === 0) {
+      await query(`ALTER TABLE assets ADD COLUMN tags JSON DEFAULT '[]' AFTER country`);
+    }
+
+    // 2. App settings table
+    await query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        \`key\` VARCHAR(255) NOT NULL,
+        \`value\` TEXT NOT NULL,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`key\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 3. Last status change column
+    const hasStatusCol = await queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'assets' AND COLUMN_NAME = 'last_status_change'`,
+    );
+    if (!hasStatusCol || hasStatusCol.count === 0) {
+      await query(`ALTER TABLE assets ADD COLUMN last_status_change DATETIME DEFAULT NULL AFTER status`);
+    }
+
+  } catch {
+    // ignore migration errors
+  }
+}
+
+// ──── App Settings ────
+
+export async function getSetting(key: string): Promise<string | null> {
+  const row = await queryOne<{ value: string }>(
+    `SELECT value FROM app_settings WHERE \`key\` = ?`,
+    [key],
+  );
+  return row?.value ?? null;
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  await query(
+    `INSERT INTO app_settings (\`key\`, \`value\`) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`)`,
+    [key, value],
+  );
+}
+
+export async function getAllSettings(): Promise<Record<string, string>> {
+  const rows = await query<{ key: string; value: string }>(
+    `SELECT \`key\`, \`value\` FROM app_settings`,
+  );
+  const settings: Record<string, string> = {};
+  for (const r of rows) {
+    settings[r.key] = r.value;
+  }
+  return settings;
 }
 
 // ──── Time-Series: Agent Metrics ────
@@ -246,8 +318,6 @@ export async function queryErrorLogs(
   }));
 }
 
-// ──── Ensure agent_error_logs table exists ────
-
 export async function ensureErrorLogsTable(): Promise<void> {
   await query(`
     CREATE TABLE IF NOT EXISTS agent_error_logs (
@@ -264,4 +334,46 @@ export async function ensureErrorLogsTable(): Promise<void> {
       INDEX idx_agent_error_logs_time (agent_id, error_time DESC)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+}
+
+// ──── Bulk Metrics Query (for AI context) ────
+
+export async function getLatestMetricsForAllAssets(): Promise<Record<string, unknown>[]> {
+  return query(`
+    SELECT
+      a.agent_id, a.hostname, a.os, a.status, a.last_seen_at,
+      a.cpu_model, a.cpu_cores,
+      a.ram_total_bytes, a.storage_total_bytes,
+      a.disk_health_status, a.disk_temperature_c,
+      a.wifi_ssid, a.network_speed_mbps,
+      a.ping_latency_ms, a.error_count,
+      m.cpu_percent, m.ram_percent, m.storage_percent,
+      m.network_status, m.network_latency_ms,
+      m.gateway_reachable, m.dns_working, m.internet_reachable
+    FROM assets a
+    LEFT JOIN LATERAL (
+      SELECT * FROM agent_metrics
+      WHERE agent_id = a.agent_id
+      ORDER BY recorded_at DESC
+      LIMIT 1
+    ) m ON true
+    ORDER BY a.hostname
+  `);
+}
+
+export async function getAssetSummaryContext(): Promise<string> {
+  const assets = await getLatestMetricsForAllAssets();
+  if (assets.length === 0) return "No assets registered.";
+
+  let summary = `Total Assets: ${assets.length}\n\n`;
+  for (const a of assets) {
+    summary += `- ${a.hostname} (${a.os}) | Status: ${a.status}`;
+    if (a.cpu_percent != null) summary += ` | CPU: ${Number(a.cpu_percent).toFixed(1)}%`;
+    if (a.ram_percent != null) summary += ` | RAM: ${Number(a.ram_percent).toFixed(1)}%`;
+    if (a.storage_percent != null) summary += ` | Storage: ${Number(a.storage_percent).toFixed(1)}%`;
+    if (a.disk_health_status && a.disk_health_status !== "ok")
+      summary += ` | Disk: ${a.disk_health_status}`;
+    summary += `\n`;
+  }
+  return summary;
 }

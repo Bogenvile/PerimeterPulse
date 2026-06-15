@@ -112,6 +112,7 @@ export interface ExtendedAsset {
   last_location_lng: number | null;
   city: string;
   country: string;
+  tags: string[];
   created_at: string;
   updated_at: string;
 }
@@ -182,4 +183,31 @@ export interface AgentCommand {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+}
+
+// ──── App Settings ────
+
+export interface AppSettings {
+  openai_api_key?: string;
+  smtp_host?: string;
+  smtp_port?: string;
+  smtp_user?: string;
+  smtp_pass?: string;
+  smtp_from?: string;
+  email_to?: string;
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
+  notifications_enabled?: string;
+}
+
+// ──── User Info (for admin panel) ────
+
+export interface UserInfo {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
 }

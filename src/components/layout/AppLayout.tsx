@@ -16,6 +16,8 @@ import {
   UserCog,
   ChevronRight,
   Download,
+  Sparkles,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -26,11 +28,13 @@ const mainNavItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/map", icon: Map, label: "Geo Map" },
   { to: "/assets", icon: Monitor, label: "Assets" },
+  { to: "/ai", icon: Sparkles, label: "AI Assistant" },
 ];
 
 const adminNavItems = [
   { to: "/api-keys", icon: Key, label: "API Keys" },
   { to: "/updates", icon: Download, label: "Agent Updates" },
+  { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
 const bottomNavItems = [
@@ -276,7 +280,6 @@ export function AppLayout() {
               <Menu className="h-5 w-5 text-foreground" />
             </button>
 
-            {/* Breadcrumb */}
             <nav className="hidden sm:flex items-center gap-1.5 text-sm">
               <button
                 onClick={() => navigate("/")}

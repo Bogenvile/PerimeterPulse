@@ -14,6 +14,8 @@ import AssetDetailPage from "./pages/AssetDetail";
 import ApiKeysPage from "./pages/ApiKeys";
 import AccountManagementPage from "./pages/AccountManagement";
 import UpdatesPage from "./pages/Updates";
+import AiChatPage from "./pages/AiChat";
+import SettingsPage from "./pages/SettingsPage";
 import LoginPage from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -60,6 +62,8 @@ const App = () => (
                 <Route path="/assets/:id" element={<AssetDetailPage />} />
                 <Route path="/api-keys" element={<ApiKeysPage />} />
                 <Route path="/updates" element={<UpdatesPage />} />
+                <Route path="/ai" element={<AiChatPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/account" element={<AccountManagementPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />

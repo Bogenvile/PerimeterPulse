@@ -1,10 +1,11 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
-import { queryOne, query, insertMetrics, insertLocation, insertErrorLogs } from "../../../db/mysql";
+import { queryOne, query, insertMetrics, insertLocation, insertErrorLogs, ensureV6Schema } from "../../../db/mysql";
 import { validateApiKeyByValue } from "../../../lib/auth";
+import { notifyStatusChange } from "../../../services/notifications";
 
 interface HeartbeatBody {
-  agent_id: string; 
+  agent_id: string;
   api_key: string;
   metrics?: any;
   location?: any;
@@ -25,6 +26,9 @@ function isValidLocation(loc: any): boolean {
 }
 
 export default defineHandler(async (event) => {
+  // Auto-migration v6
+  await ensureV6Schema();
+
   const body = await readBody<HeartbeatBody>(event);
   if (!body?.agent_id || !body?.api_key) {
     throw createError({ statusCode: 400, statusMessage: "agent_id and api_key required" });
@@ -40,7 +44,6 @@ export default defineHandler(async (event) => {
     const n = body.network_info || {};
     const l = body.location || {};
 
-    // 1. Sanitize Metrics object
     const safeMetrics = {
       cpu_percent: m.cpu_percent ?? 0,
       ram_percent: m.ram_percent ?? 0,
@@ -70,57 +73,43 @@ export default defineHandler(async (event) => {
       }
     }
 
-    // 2. Hanya simpan lokasi jika koordinat valid
     const validLocation = isValidLocation(l);
     if (validLocation) {
-      const safeLocation = {
+      await insertLocation(body.agent_id, {
         latitude: Number(l.latitude),
         longitude: Number(l.longitude),
         accuracy_meters: l.accuracy_meters ?? 0,
         source: l.source || "unknown",
         timestamp: l.timestamp || new Date().toISOString(),
-      };
-      await insertLocation(body.agent_id, safeLocation);
+      });
     }
 
-    // 3. Update Asset Info
-    const asset = await queryOne<{ id: string }>(
-      `SELECT id FROM assets WHERE agent_id = ?`, [body.agent_id],
+    const asset = await queryOne<{
+      id: string; status: string; hostname: string; last_status_change: string | null;
+    }>(
+      `SELECT id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
+      [body.agent_id],
     );
 
     if (asset) {
-      const status = determineStatus(safeMetrics);
-      
-      const wifiSsid = n.wifi_ssid || null;
-      const wifiSignal = n.wifi_signal_dbm != null ? n.wifi_signal_dbm : null;
-      const wifiIp = n.wifi_ip || null;
-      const gatewayIp = n.gateway_ip || null;
-      const netSpeed = n.network_speed_mbps != null ? n.network_speed_mbps : null;
-      const ipAddr = n.ip_addresses ? JSON.stringify(n.ip_addresses) : null;
+      const oldStatus = asset.status;
+      const newStatus = determineStatus(safeMetrics);
 
-      // Update query dasar
-      const updateFields: string[] = [
-        "status=?", "last_seen_at=NOW()",
-      ];
-      const updateValues: any[] = [status];
+      const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
+      const updateValues: any[] = [newStatus];
 
-      // Hanya update lokasi jika koordinat valid
       if (validLocation) {
         updateFields.push(
-          "last_location_lat=?",
-          "last_location_lng=?",
+          "last_location_lat=?", "last_location_lng=?",
           "accuracy_meters=COALESCE(?, accuracy_meters)",
           "location_source=COALESCE(NULLIF(?,''), location_source)",
           "city=COALESCE(NULLIF(?, ''), city)",
           "country=COALESCE(NULLIF(?, ''), country)",
         );
         updateValues.push(
-          Number(l.latitude),
-          Number(l.longitude),
-          l.accuracy_meters ?? 0,
-          l.source || null,
-          l.city || null,
-          l.country || null,
+          Number(l.latitude), Number(l.longitude),
+          l.accuracy_meters ?? 0, l.source || null,
+          l.city || null, l.country || null,
         );
       }
 
@@ -138,28 +127,35 @@ export default defineHandler(async (event) => {
       );
       updateValues.push(
         safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
-        wifiSsid, wifiSignal,
-        wifiIp, gatewayIp,
-        netSpeed,
-        m.ping_latency_ms ?? 0,
-        m.error_count ?? 0,
-        ipAddr,
+        n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
+        n.wifi_ip || null, n.gateway_ip || null,
+        n.network_speed_mbps ?? null,
+        m.ping_latency_ms ?? 0, m.error_count ?? 0,
+        n.ip_addresses ? JSON.stringify(n.ip_addresses) : null,
       );
 
-      updateValues.push(body.agent_id);
+      // Track status change
+      if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
+        updateFields.push("last_status_change=NOW()");
+      }
 
+      updateValues.push(body.agent_id);
       await query(
         `UPDATE assets SET ${updateFields.join(", ")} WHERE agent_id=?`,
         updateValues,
       );
+
+      // Send notification on status change to warning/critical
+      if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
+        notifyStatusChange(asset.hostname || body.agent_id, oldStatus, newStatus, safeMetrics).catch((e) => {
+          console.error("Notification failed:", e);
+        });
+      }
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("Heartbeat DB Error:", msg, err);
-    throw createError({
-      statusCode: 500,
-      statusMessage: "Database error: " + msg,
-    });
+    throw createError({ statusCode: 500, statusMessage: "Database error: " + msg });
   }
 
   return { ok: true, server_time: new Date().toISOString() };
@@ -170,7 +166,7 @@ function determineStatus(m: any): "online" | "warning" | "critical" {
   const cpu = m.cpu_percent || 0;
   const ram = m.ram_percent || 0;
   const storage = m.storage_percent || 0;
-  
+
   if (cpu > 98 || ram > 98 || storage > 99 || m.disk_health_status === "critical") return "critical";
   if (cpu > 90 || ram > 90 || storage > 95 || m.disk_health_status === "warning") return "warning";
   return "online";

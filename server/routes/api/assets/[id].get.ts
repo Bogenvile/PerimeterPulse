@@ -16,7 +16,7 @@ export default defineHandler(async (event) => {
             wifi_ssid, wifi_signal_dbm, wifi_ip, gateway_ip,
             network_speed_mbps, ping_latency_ms, error_count,
             status, last_seen_at, last_location_lat, last_location_lng,
-            city, country,
+            city, country, tags,
             created_at, updated_at
      FROM assets WHERE id = ? OR agent_id = ?`,
     [id, id],
@@ -27,6 +27,7 @@ export default defineHandler(async (event) => {
     ...row,
     mac_addresses: parseJsonArray(row.mac_addresses),
     ip_addresses: parseJsonArray(row.ip_addresses),
+    tags: parseJsonArray(row.tags),
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
     last_seen_at: row.last_seen_at ? toIso(row.last_seen_at) : null,

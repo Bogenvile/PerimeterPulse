@@ -7,12 +7,13 @@ import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { MapView } from "@/components/dashboard/MapView";
 import { DeleteAssetDialog } from "@/components/dashboard/DeleteAssetDialog";
 import { RemoteCommands } from "@/components/dashboard/RemoteCommands";
+import { TagInput } from "@/components/dashboard/TagInput";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, Network,
   Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X, Trash2, Zap,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken } from "@/lib/api";
+import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken, updateAssetTags } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";
 import { showSuccess, showError } from "@/utils/toast";
 import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ErrorLogItem } from "@/lib/types";
@@ -86,6 +87,9 @@ const AssetDetailPage = () => {
   const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
   const [loadingErrors, setLoadingErrors] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingTags, setEditingTags] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
+  const [savingTags, setSavingTags] = useState(false);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -97,7 +101,7 @@ const AssetDetailPage = () => {
       getAssetMetrics(id, timeRange).catch(() => [] as MetricsDataPoint[]),
       getAssetLocations(id, "-24h").catch(() => [] as LocationDataPoint[]),
     ])
-      .then(([a, m, l]) => { setAsset(a); setMetrics(m); setLocations(l); })
+      .then(([a, m, l]) => { setAsset(a); setMetrics(m); setLocations(l); setTags(a.tags || []); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [token, id, timeRange]);
@@ -125,6 +129,22 @@ const AssetDetailPage = () => {
       setDeleting(false);
     }
   }, [asset, navigate]);
+
+  const handleSaveTags = useCallback(async () => {
+    if (!asset) return;
+    setSavingTags(true);
+    try {
+      const result = await updateAssetTags(asset.id, tags);
+      setTags(result.tags);
+      setAsset((prev) => prev ? { ...prev, tags: result.tags } : prev);
+      showSuccess("Tags updated");
+      setEditingTags(false);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Failed to update tags");
+    } finally {
+      setSavingTags(false);
+    }
+  }, [asset, tags]);
 
   if (loading) {
     return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
@@ -164,7 +184,6 @@ const AssetDetailPage = () => {
 
   const visibleTabs = tabs.filter((t) => !t.adminOnly || isAdmin);
 
-  // Improved Disk Display Logic
   const isDriveLetterOnly = asset.disk_model && asset.disk_model.includes(":");
   const diskDisplayName = isDriveLetterOnly ? (asset.disk_type || "Disk") : (asset.disk_model || "Unknown");
   const diskDisplaySub = isDriveLetterOnly
@@ -210,6 +229,54 @@ const AssetDetailPage = () => {
             }
           />
         )}
+      </div>
+
+      {/* Tags Section */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">🏷️</span>
+            <h3 className="text-sm font-semibold text-foreground">Tags</h3>
+          </div>
+          {isAdmin && !editingTags && (
+            <button
+              onClick={() => setEditingTags(true)}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              Edit
+            </button>
+          )}
+          {editingTags && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => { setTags(asset.tags || []); setEditingTags(false); }}
+                className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveTags}
+                disabled={savingTags}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors inline-flex items-center gap-1"
+              >
+                {savingTags ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                Save
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="p-5">
+          <TagInput
+            tags={editingTags ? tags : (asset.tags || [])}
+            onChange={setTags}
+            readonly={!editingTags}
+          />
+          {editingTags && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Press Enter or comma to add. Suggested: production, staging, critical, office, remote
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Hardware Info Cards */}
@@ -283,7 +350,6 @@ const AssetDetailPage = () => {
       {/* Tab Content */}
       {activeTab === "overview" && (
         <div className="space-y-6 animate-fade-in">
-          {/* Location */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
