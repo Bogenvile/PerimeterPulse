@@ -66,11 +66,11 @@ export default defineHandler(async (event) => {
       timestamp: m.timestamp || new Date().toISOString(),
     };
 
-    if (body.metrics) {
-      await insertMetrics(body.agent_id, safeMetrics);
-      if (body.metrics.error_logs && body.metrics.error_logs.length > 0) {
-        await insertErrorLogs(body.agent_id, body.metrics.error_logs);
-      }
+    // Always store metrics & location regardless of asset existence
+    await insertMetrics(body.agent_id, safeMetrics);
+
+    if (body.metrics?.error_logs && body.metrics.error_logs.length > 0) {
+      await insertErrorLogs(body.agent_id, body.metrics.error_logs);
     }
 
     const validLocation = isValidLocation(l);
@@ -84,102 +84,237 @@ export default defineHandler(async (event) => {
       });
     }
 
-    const asset = await queryOne<{
+    // Check if asset exists
+    let asset = await queryOne<{
       id: string; status: string; hostname: string; last_status_change: string | null;
     }>(
       `SELECT id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
       [body.agent_id],
     );
 
-    if (asset) {
-      const oldStatus = asset.status;
-      const newStatus = determineStatus(safeMetrics);
+    // ── Asset was deleted or never registered — recreate it ──
+    if (!asset) {
+      console.log(`[heartbeat] Asset not found for ${body.agent_id}, auto-creating...`);
 
-      // Build UPDATE dynamically based on what columns exist in the assets table
-      const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
-      const updateValues: any[] = [newStatus];
+      const hostname = n.hostname || body.agent_id;
+      const os = n.os || "unknown";
+      const osVersion = n.os_version || "";
+      const ipAddresses = n.ip_addresses ? JSON.stringify(n.ip_addresses) : "[]";
+      const macAddresses = n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]";
 
+      try {
+        await query(
+          `INSERT INTO assets
+            (agent_id, hostname, os, os_version, agent_version,
+             mac_addresses, ip_addresses, cpu_model, cpu_cores,
+             ram_total_bytes, storage_total_bytes,
+             disk_model, disk_type, disk_health_status, disk_temperature_c,
+             wifi_ssid, wifi_signal_dbm, network_speed_mbps,
+             status, last_seen_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+          [
+            body.agent_id,
+            hostname,
+            os,
+            osVersion,
+            "unknown",
+            macAddresses,
+            ipAddresses,
+            m.cpu_model || "Unknown",
+            m.cpu_cores || 0,
+            m.ram_total_bytes || 0,
+            m.storage_total_bytes || 0,
+            m.disk_model || "",
+            m.disk_type || "unknown",
+            safeMetrics.disk_health_status,
+            safeMetrics.disk_temperature_c,
+            n.wifi_ssid || "",
+            n.wifi_signal_dbm ?? null,
+            n.network_speed_mbps ?? 0,
+            "online",
+          ],
+        );
+      } catch (insertErr) {
+        // Might fail if columns don't match — try minimal insert
+        console.warn("[heartbeat] Full insert failed, trying minimal:", insertErr);
+        await query(
+          `INSERT INTO assets
+            (agent_id, hostname, os, os_version, agent_version,
+             mac_addresses, ip_addresses, cpu_model,
+             ram_total_bytes, storage_total_bytes,
+             disk_type, status, last_seen_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+          [
+            body.agent_id,
+            hostname,
+            os,
+            osVersion,
+            "unknown",
+            macAddresses,
+            ipAddresses,
+            "Unknown",
+            0,
+            0,
+            "unknown",
+            "online",
+          ],
+        );
+      }
+
+      // If we have location data, update it on the newly created asset
       if (validLocation) {
-        updateFields.push(
+        const locFields = [
           "last_location_lat=?", "last_location_lng=?",
           "city=COALESCE(NULLIF(?, ''), city)",
           "country=COALESCE(NULLIF(?, ''), country)",
-        );
-        updateValues.push(
+        ];
+        const locValues: any[] = [
           Number(l.latitude), Number(l.longitude),
           l.city || null, l.country || null,
-        );
+        ];
 
-        // Only add accuracy_meters if the column exists
         if (await columnExists("assets", "accuracy_meters")) {
-          updateFields.push("accuracy_meters=?");
-          updateValues.push(l.accuracy_meters ?? 0);
+          locFields.push("accuracy_meters=?");
+          locValues.push(l.accuracy_meters ?? 0);
+        }
+        if (await columnExists("assets", "location_source")) {
+          locFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
+          locValues.push(l.source || null);
         }
 
-        // Only add location_source if the column exists
-        if (await columnExists("assets", "location_source")) {
-          updateFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
-          updateValues.push(l.source || null);
-        }
+        locValues.push(body.agent_id);
+        await query(
+          `UPDATE assets SET ${locFields.join(", ")} WHERE agent_id=?`,
+          locValues,
+        );
       }
 
-      // Always safe columns
+      // Update network info
+      const netFields: string[] = [];
+      const netValues: any[] = [];
+
+      if (n.wifi_ssid) { netFields.push("wifi_ssid=?"); netValues.push(n.wifi_ssid); }
+      if (n.wifi_signal_dbm != null) { netFields.push("wifi_signal_dbm=?"); netValues.push(n.wifi_signal_dbm); }
+      if (n.network_speed_mbps) { netFields.push("network_speed_mbps=?"); netValues.push(n.network_speed_mbps); }
+      if (n.ip_addresses) { netFields.push("ip_addresses=?"); netValues.push(JSON.stringify(n.ip_addresses)); }
+
+      if (await columnExists("assets", "wifi_ip") && n.wifi_ip) {
+        netFields.push("wifi_ip=?");
+        netValues.push(n.wifi_ip);
+      }
+      if (await columnExists("assets", "gateway_ip") && n.gateway_ip) {
+        netFields.push("gateway_ip=?");
+        netValues.push(n.gateway_ip);
+      }
+      if (await columnExists("assets", "ping_latency_ms")) {
+        netFields.push("ping_latency_ms=?");
+        netValues.push(m.ping_latency_ms ?? 0);
+      }
+      if (await columnExists("assets", "error_count")) {
+        netFields.push("error_count=?");
+        netValues.push(m.error_count ?? 0);
+      }
+
+      if (netFields.length > 0) {
+        netValues.push(body.agent_id);
+        await query(
+          `UPDATE assets SET ${netFields.join(", ")} WHERE agent_id=?`,
+          netValues,
+        );
+      }
+
+      console.log(`[heartbeat] ✅ Auto-created asset for ${body.agent_id} (${hostname})`);
+
+      return { ok: true, server_time: new Date().toISOString(), action: "auto_registered" };
+    }
+
+    // ── Asset exists — normal update path ──
+    const oldStatus = asset.status;
+    const newStatus = determineStatus(safeMetrics);
+
+    // Build UPDATE dynamically based on what columns exist
+    const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
+    const updateValues: any[] = [newStatus];
+
+    if (validLocation) {
       updateFields.push(
-        "disk_health_status=COALESCE(?, disk_health_status)",
-        "disk_temperature_c=COALESCE(?, disk_temperature_c)",
-        "wifi_ssid=COALESCE(NULLIF(?, ''), wifi_ssid)",
-        "wifi_signal_dbm=COALESCE(?, wifi_signal_dbm)",
-        "network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0))",
-        "ip_addresses=COALESCE(?, ip_addresses)",
+        "last_location_lat=?", "last_location_lng=?",
+        "city=COALESCE(NULLIF(?, ''), city)",
+        "country=COALESCE(NULLIF(?, ''), country)",
       );
       updateValues.push(
-        safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
-        n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
-        n.network_speed_mbps ?? null,
-        n.ip_addresses ? JSON.stringify(n.ip_addresses) : null,
+        Number(l.latitude), Number(l.longitude),
+        l.city || null, l.country || null,
       );
 
-      // Optional columns — only update if they exist
-      if (await columnExists("assets", "wifi_ip")) {
-        updateFields.push("wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip)");
-        updateValues.push(n.wifi_ip || null);
+      if (await columnExists("assets", "accuracy_meters")) {
+        updateFields.push("accuracy_meters=?");
+        updateValues.push(l.accuracy_meters ?? 0);
       }
 
-      if (await columnExists("assets", "gateway_ip")) {
-        updateFields.push("gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip)");
-        updateValues.push(n.gateway_ip || null);
-      }
-
-      if (await columnExists("assets", "ping_latency_ms")) {
-        updateFields.push("ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))");
-        updateValues.push(m.ping_latency_ms ?? 0);
-      }
-
-      if (await columnExists("assets", "error_count")) {
-        updateFields.push("error_count=COALESCE(?, COALESCE(error_count, 0))");
-        updateValues.push(m.error_count ?? 0);
-      }
-
-      // Track status change
-      if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
-        if (await columnExists("assets", "last_status_change")) {
-          updateFields.push("last_status_change=NOW()");
-        }
-      }
-
-      updateValues.push(body.agent_id);
-      await query(
-        `UPDATE assets SET ${updateFields.join(", ")} WHERE agent_id=?`,
-        updateValues,
-      );
-
-      // Send notification on status change to warning/critical
-      if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
-        notifyStatusChange(asset.hostname || body.agent_id, oldStatus, newStatus, safeMetrics).catch((e) => {
-          console.error("Notification failed:", e);
-        });
+      if (await columnExists("assets", "location_source")) {
+        updateFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
+        updateValues.push(l.source || null);
       }
     }
+
+    // Always safe columns
+    updateFields.push(
+      "disk_health_status=COALESCE(?, disk_health_status)",
+      "disk_temperature_c=COALESCE(?, disk_temperature_c)",
+      "wifi_ssid=COALESCE(NULLIF(?, ''), wifi_ssid)",
+      "wifi_signal_dbm=COALESCE(?, wifi_signal_dbm)",
+      "network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0))",
+      "ip_addresses=COALESCE(?, ip_addresses)",
+    );
+    updateValues.push(
+      safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
+      n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
+      n.network_speed_mbps ?? null,
+      n.ip_addresses ? JSON.stringify(n.ip_addresses) : null,
+    );
+
+    // Optional columns
+    if (await columnExists("assets", "wifi_ip")) {
+      updateFields.push("wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip)");
+      updateValues.push(n.wifi_ip || null);
+    }
+
+    if (await columnExists("assets", "gateway_ip")) {
+      updateFields.push("gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip)");
+      updateValues.push(n.gateway_ip || null);
+    }
+
+    if (await columnExists("assets", "ping_latency_ms")) {
+      updateFields.push("ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))");
+      updateValues.push(m.ping_latency_ms ?? 0);
+    }
+
+    if (await columnExists("assets", "error_count")) {
+      updateFields.push("error_count=COALESCE(?, COALESCE(error_count, 0))");
+      updateValues.push(m.error_count ?? 0);
+    }
+
+    // Track status change
+    if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
+      if (await columnExists("assets", "last_status_change")) {
+        updateFields.push("last_status_change=NOW()");
+      }
+    }
+
+    updateValues.push(body.agent_id);
+    await query(
+      `UPDATE assets SET ${updateFields.join(", ")} WHERE agent_id=?`,
+      updateValues,
+    );
+
+    // Send notification on status change
+    if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
+      notifyStatusChange(asset.hostname || body.agent_id, oldStatus, newStatus, safeMetrics).catch((e) => {
+        console.error("Notification failed:", e);
+      });
+    }
+
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("Heartbeat DB Error:", msg, err);
