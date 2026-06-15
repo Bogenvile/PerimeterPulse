@@ -1,10 +1,13 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, createError } from "nitro/h3";
-import { queryOne, parseJsonArray } from "../../../db/mysql";
+import { queryOne, parseJsonArray, ensureV6Schema } from "../../../db/mysql";
 import { requireUserAuth } from "../../../lib/auth";
 
 export default defineHandler(async (event) => {
   await requireUserAuth(event);
+
+  await ensureV6Schema();
+
   const id = getRouterParam(event, "id");
   if (!id) throw createError({ statusCode: 400, statusMessage: "id is required" });
 

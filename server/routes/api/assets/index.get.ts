@@ -1,10 +1,13 @@
 import { defineHandler } from "nitro";
 import { getQuery } from "nitro/h3";
 import { requireUserAuth } from "../../../lib/auth";
-import { query, parseJsonArray } from "../../../db/mysql";
+import { query, parseJsonArray, ensureV6Schema } from "../../../db/mysql";
 
 export default defineHandler(async (event) => {
   await requireUserAuth(event);
+
+  // Ensure tags column and other v6 schema additions exist
+  await ensureV6Schema();
 
   const q = getQuery(event);
   const filterTags: string[] = [];
