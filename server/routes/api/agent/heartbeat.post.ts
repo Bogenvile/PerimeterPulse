@@ -13,6 +13,7 @@ interface HeartbeatBody {
   network_info?: any;
 }
 
+// Try to extract a real hostname from the heartbeat payload
 function extractHostname(body: HeartbeatBody): string | null {
   const candidates = [
     body.hostname,
@@ -28,6 +29,7 @@ function extractHostname(body: HeartbeatBody): string | null {
   for (const c of candidates) {
     if (c && typeof c === "string") {
       const trimmed = c.trim();
+      // Reject empty, localhost, and agent_id-like values
       if (trimmed && trimmed.toLowerCase() !== "localhost" && !trimmed.startsWith("agent-")) {
         return trimmed;
       }
@@ -89,7 +91,7 @@ export default defineHandler(async (event) => {
       timestamp: m.timestamp || new Date().toISOString(),
     };
 
-    // Always store metrics
+    // Always store metrics regardless of asset status
     await insertMetrics(body.agent_id, safeMetrics);
 
     if (body.metrics?.error_logs && body.metrics.error_logs.length > 0) {
@@ -107,50 +109,55 @@ export default defineHandler(async (event) => {
       });
     }
 
-    const extractedHostname = extractHostname(body);
+    // ── Step 1: Look up by agent_id (primary, like the original code) ──
+    let asset = await queryOne<{
+      id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
+    }>(
+      `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
+      [body.agent_id],
+    );
 
-    // ── Primary lookup: by hostname ──
-    let asset: { id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null } | null = null;
+    // ── Step 2: If not found by agent_id, try matching by hostname ──
+    if (!asset) {
+      const extractedHostname = extractHostname(body);
+      if (extractedHostname) {
+        console.log(`[heartbeat] agent_id ${body.agent_id} not found, trying hostname: "${extractedHostname}"`);
 
-    if (extractedHostname) {
-      asset = await queryOne(
-        `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
-        [extractedHostname],
-      );
+        const byHostname = await queryOne<{
+          id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
+        }>(
+          `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
+          [extractedHostname],
+        );
 
-      if (asset && asset.agent_id !== body.agent_id) {
-        // Hostname matches but agent_id changed — update it
-        console.log(`[heartbeat] Updating agent_id for "${extractedHostname}": ${asset.agent_id} → ${body.agent_id}`);
+        if (byHostname) {
+          const oldAgentId = byHostname.agent_id;
+          console.log(`[heartbeat] Hostname match found: "${extractedHostname}" was ${oldAgentId}, now ${body.agent_id}`);
 
-        const oldAgentId = asset.agent_id;
-        await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, asset.id]);
+          // Update agent_id on existing asset
+          await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, byHostname.id]);
 
-        // Reassign time-series data
-        await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
-        await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
-        await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
-        try { await query(`UPDATE agent_commands SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]); } catch {}
+          // Reassign all time-series data
+          await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+          await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+          await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+          try { await query(`UPDATE agent_commands SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]); } catch {}
 
-        asset = { ...asset, agent_id: body.agent_id };
+          asset = { ...byHostname, agent_id: body.agent_id };
+        }
       }
     }
 
-    // ── Fallback: by agent_id ──
+    // ── Step 3: Still not found — create new asset ──
     if (!asset) {
-      asset = await queryOne(
-        `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
-        [body.agent_id],
-      );
-    }
-
-    // ── Still not found — create new ──
-    if (!asset) {
+      const extractedHostname = extractHostname(body);
+      // Use real hostname if available, otherwise placeholder (NOT agent_id!)
       const agentSuffix = body.agent_id.replace(/^agent-/, "").slice(0, 8);
       const hostname = extractedHostname || `Host-${agentSuffix}`;
       const os = n.os || m.os || "unknown";
       const osVersion = n.os_version || m.os_version || "";
 
-      console.log(`[heartbeat] Auto-creating asset: "${hostname}" (${body.agent_id})`);
+      console.log(`[heartbeat] Auto-creating asset: "${hostname}" (agent_id: ${body.agent_id})`);
 
       const ipAddresses = n.ip_addresses ? JSON.stringify(n.ip_addresses) : "[]";
       const macAddresses = n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]";
@@ -200,12 +207,27 @@ export default defineHandler(async (event) => {
       return { ok: true, server_time: new Date().toISOString(), action: "auto_registered" };
     }
 
-    // ── Asset exists — update it ──
+    // ── Asset found — update it ──
     const oldStatus = asset.status;
     const newStatus = determineStatus(safeMetrics);
 
     const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
     const updateValues: any[] = [newStatus];
+
+    // Update hostname from payload if provided and different
+    const extractedHostname = extractHostname(body);
+    if (extractedHostname && extractedHostname !== asset.hostname) {
+      // Check no other asset already has this hostname
+      const conflict = await queryOne<{ id: string }>(
+        `SELECT id FROM assets WHERE hostname = ? AND id != ?`,
+        [extractedHostname, asset.id],
+      );
+      if (!conflict) {
+        console.log(`[heartbeat] Updating hostname for ${body.agent_id}: "${asset.hostname}" → "${extractedHostname}"`);
+        updateFields.push("hostname=?");
+        updateValues.push(extractedHostname);
+      }
+    }
 
     if (validLocation) {
       updateFields.push(
