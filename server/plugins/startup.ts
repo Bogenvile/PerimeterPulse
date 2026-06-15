@@ -1,19 +1,6 @@
-import { defineNitroPlugin } from "nitro";
-import { ensureV6Schema } from "../db/mysql";
-import { startTelegramBot } from "./telegram-bot";
-
-// Plugin startup yang hanya dijalankan sekali saat Nitro siap.
-export default defineNitroPlugin(async () => {
-  try {
-    await ensureV6Schema();
-    console.log("✅ Database schema v6 ready");
-  } catch (err) {
-    console.error("Schema migration error:", err);
-  }
-
-  try {
-    startTelegramBot();
-  } catch (err) {
-    console.error("Telegram bot init error:", err);
-  }
-});
+export default async function (nitroApp: any) {
+  // Plugin startup that runs once when Nitro is ready.
+  // Migrations are handled on first heartbeat (agent/heartbeat.post.ts)
+  // Telegram bot starts when settings are saved (settings/index.put.ts)
+  console.log("✅ Nitro server ready");
+}
