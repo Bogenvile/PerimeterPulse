@@ -1,7 +1,7 @@
 import { defineHandler } from "nitro";
 import { getQuery } from "nitro/h3";
 import { requireUserAuth } from "../../../lib/auth";
-import { query, parseJsonArray, ensureV6Schema } from "../../../db/mysql";
+import { query, parseJsonArray, ensureV6Schema, columnExists } from "../../../db/mysql";
 
 export default defineHandler(async (event) => {
   await requireUserAuth(event);
@@ -9,25 +9,30 @@ export default defineHandler(async (event) => {
   // Run migration to ensure tags column exists
   await ensureV6Schema();
 
+  // Dynamically check if tags column actually exists after migration
+  const hasTags = await columnExists("assets", "tags");
+
   const q = getQuery(event);
   const filterTags: string[] = [];
   if (typeof q.tags === "string" && q.tags.trim()) {
     filterTags.push(...q.tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean));
   }
 
-  let sql = `SELECT id, agent_id, hostname, os, os_version, agent_version,
+  // Build column list dynamically
+  const baseColumns = `id, agent_id, hostname, os, os_version, agent_version,
             mac_addresses, ip_addresses, cpu_model, cpu_cores,
             ram_total_bytes, storage_total_bytes,
             disk_model, disk_type, disk_health_status, disk_temperature_c,
             wifi_ssid, wifi_signal_dbm, wifi_ip, gateway_ip,
             network_speed_mbps, ping_latency_ms, error_count,
             status, last_seen_at, last_location_lat, last_location_lng,
-            city, country, tags,
-            created_at, updated_at
-     FROM assets`;
+            city, country`;
+  const selectColumns = hasTags ? `${baseColumns}, tags` : baseColumns;
+
+  let sql = `SELECT ${selectColumns} FROM assets`;
   const params: unknown[] = [];
 
-  if (filterTags.length > 0) {
+  if (filterTags.length > 0 && hasTags) {
     const conditions = filterTags.map(() => `JSON_CONTAINS(tags, JSON_QUOTE(?))`).join(" OR ");
     sql += ` WHERE (${conditions})`;
     params.push(...filterTags);
@@ -41,7 +46,7 @@ export default defineHandler(async (event) => {
     ...r,
     mac_addresses: parseJsonArray(r.mac_addresses),
     ip_addresses: parseJsonArray(r.ip_addresses),
-    tags: parseJsonArray(r.tags),
+    tags: hasTags ? parseJsonArray(r.tags) : [],
     created_at: toIso(r.created_at),
     updated_at: toIso(r.updated_at),
     last_seen_at: r.last_seen_at ? toIso(r.last_seen_at) : null,

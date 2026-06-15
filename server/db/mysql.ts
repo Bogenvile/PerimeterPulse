@@ -89,52 +89,81 @@ async function safeAddColumn(
   table: string,
   column: string,
   definition: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
+    // Try adding column WITHOUT position (AFTER can fail)
     await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    console.log(`[migration] Added column ${table}.${column}`);
+    return true;
   } catch (err: unknown) {
-    // MySQL errno 1060 = Duplicate column name — column already exists, OK
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "errno" in err &&
-      (err as { errno: number }).errno === 1060
-    ) {
-      return;
+    const errno = typeof err === "object" && err !== null && "errno" in err
+      ? (err as { errno: number }).errno
+      : null;
+    const code = typeof err === "object" && err !== null && "code" in err
+      ? (err as { code: string }).code
+      : null;
+
+    // MySQL errno 1060 = Duplicate column name — already exists, OK
+    if (errno === 1060 || code === "ER_DUP_FIELDNAME") {
+      console.log(`[migration] Column ${table}.${column} already exists`);
+      return true;
     }
-    // ER_DUP_FIELDNAME as a string code fallback
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "code" in err &&
-      (err as { code: string }).code === "ER_DUP_FIELDNAME"
-    ) {
-      return;
-    }
-    // Any other error — log but don't crash
-    console.error(`[migration] Failed to add ${table}.${column}:`, err);
+
+    // Any other error — log it clearly
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[migration] FAILED to add ${table}.${column}: ${msg}`);
+    return false;
+  }
+}
+
+// Check if a column exists
+async function columnExists(table: string, column: string): Promise<boolean> {
+  try {
+    const rows = await query<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = ?
+         AND COLUMN_NAME = ?`,
+      [table, column],
+    );
+    return (rows[0]?.cnt ?? 0) > 0;
+  } catch {
+    return false;
   }
 }
 
 // ──── Auto-migration v6 ────
 
+let v6Done = false;
+
 export async function ensureV6Schema(): Promise<void> {
-  // 1. Tags column — try to add, ignore if exists
-  await safeAddColumn("assets", "tags", "JSON DEFAULT '[]' AFTER country");
+  if (v6Done) return;
+
+  // 1. Tags column — add if missing (no AFTER clause to avoid position errors)
+  await safeAddColumn("assets", "tags", "JSON DEFAULT ('[]')");
 
   // 2. App settings table — CREATE IF NOT EXISTS is always safe
-  await query(`
-    CREATE TABLE IF NOT EXISTS app_settings (
-      \`key\` VARCHAR(255) NOT NULL,
-      \`value\` TEXT NOT NULL,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (\`key\`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        \`key\` VARCHAR(255) NOT NULL,
+        \`value\` TEXT NOT NULL,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`key\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  } catch (err) {
+    console.error("[migration] Failed to create app_settings:", err);
+  }
 
   // 3. Last status change column
-  await safeAddColumn("assets", "last_status_change", "DATETIME DEFAULT NULL AFTER status");
+  await safeAddColumn("assets", "last_status_change", "DATETIME DEFAULT NULL");
+
+  v6Done = true;
+  console.log("[migration] v6 schema check complete");
 }
+
+export { columnExists };
 
 // ──── App Settings ────
 

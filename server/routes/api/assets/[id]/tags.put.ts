@@ -1,12 +1,17 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, readBody, createError } from "nitro/h3";
 import { requireAdminAuth } from "../../../../lib/auth";
-import { queryOne, query, tagsToJson, ensureV6Schema } from "../../../../db/mysql";
+import { queryOne, query, tagsToJson, ensureV6Schema, columnExists } from "../../../../db/mysql";
 
 export default defineHandler(async (event) => {
   await requireAdminAuth(event);
 
   await ensureV6Schema();
+
+  const hasTags = await columnExists("assets", "tags");
+  if (!hasTags) {
+    throw createError({ statusCode: 500, statusMessage: "Tags feature not available. Run migration manually." });
+  }
 
   const id = getRouterParam(event, "id");
   if (!id) throw createError({ statusCode: 400, statusMessage: "id is required" });

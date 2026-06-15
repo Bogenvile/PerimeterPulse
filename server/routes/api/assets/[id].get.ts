@@ -1,6 +1,6 @@
 import { defineHandler } from "nitro";
 import { getRouterParam, createError } from "nitro/h3";
-import { queryOne, parseJsonArray, ensureV6Schema } from "../../../db/mysql";
+import { queryOne, parseJsonArray, ensureV6Schema, columnExists } from "../../../db/mysql";
 import { requireUserAuth } from "../../../lib/auth";
 
 export default defineHandler(async (event) => {
@@ -8,18 +8,23 @@ export default defineHandler(async (event) => {
 
   await ensureV6Schema();
 
+  const hasTags = await columnExists("assets", "tags");
+
   const id = getRouterParam(event, "id");
   if (!id) throw createError({ statusCode: 400, statusMessage: "id is required" });
 
-  const row = await queryOne<Record<string, unknown>>(
-    `SELECT id, agent_id, hostname, os, os_version, agent_version,
+  const baseColumns = `id, agent_id, hostname, os, os_version, agent_version,
             mac_addresses, ip_addresses, cpu_model, cpu_cores,
             ram_total_bytes, storage_total_bytes,
             disk_model, disk_type, disk_health_status, disk_temperature_c,
             wifi_ssid, wifi_signal_dbm, wifi_ip, gateway_ip,
             network_speed_mbps, ping_latency_ms, error_count,
             status, last_seen_at, last_location_lat, last_location_lng,
-            city, country, tags,
+            city, country`;
+  const selectColumns = hasTags ? `${baseColumns}, tags` : baseColumns;
+
+  const row = await queryOne<Record<string, unknown>>(
+    `SELECT ${selectColumns},
             created_at, updated_at
      FROM assets WHERE id = ? OR agent_id = ?`,
     [id, id],
@@ -30,7 +35,7 @@ export default defineHandler(async (event) => {
     ...row,
     mac_addresses: parseJsonArray(row.mac_addresses),
     ip_addresses: parseJsonArray(row.ip_addresses),
-    tags: parseJsonArray(row.tags),
+    tags: hasTags ? parseJsonArray(row.tags) : [],
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
     last_seen_at: row.last_seen_at ? toIso(row.last_seen_at) : null,
