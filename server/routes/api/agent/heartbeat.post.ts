@@ -26,7 +26,6 @@ function isValidLocation(loc: any): boolean {
 }
 
 export default defineHandler(async (event) => {
-  // Auto-migration v6
   await ensureV6Schema();
 
   const body = await readBody<HeartbeatBody>(event);
@@ -84,21 +83,49 @@ export default defineHandler(async (event) => {
       });
     }
 
-    // Check if asset exists
+    // ── Find existing asset ──
     let asset = await queryOne<{
-      id: string; status: string; hostname: string; last_status_change: string | null;
+      id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
     }>(
-      `SELECT id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
+      `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
       [body.agent_id],
     );
 
-    // ── Asset was deleted or never registered — recreate it ──
+    // ── Not found by agent_id — try matching by hostname to avoid duplicates ──
     if (!asset) {
-      console.log(`[heartbeat] Asset not found for ${body.agent_id}, auto-creating...`);
+      const heartbeatHostname = n.hostname || m.hostname || body.agent_id;
+      const existingByHostname = await queryOne<{
+        id: string; agent_id: string; status: string; hostname: string;
+      }>(
+        `SELECT id, agent_id, status, hostname FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
+        [heartbeatHostname],
+      );
 
-      const hostname = n.hostname || body.agent_id;
-      const os = n.os || "unknown";
-      const osVersion = n.os_version || "";
+      if (existingByHostname) {
+        // Same hostname, different agent_id — update the agent_id to keep one asset
+        console.log(`[heartbeat] Merging: hostname "${heartbeatHostname}" already exists as ${existingByHostname.agent_id}, updating to ${body.agent_id}`);
+        await query(
+          `UPDATE assets SET agent_id = ? WHERE id = ?`,
+          [body.agent_id, existingByHostname.id],
+        );
+        // Re-fetch with new agent_id
+        asset = await queryOne<{
+          id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
+        }>(
+          `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
+          [body.agent_id],
+        );
+      }
+    }
+
+    // ── Still not found — create new asset ──
+    if (!asset) {
+      const hostname = n.hostname || m.hostname || body.agent_id;
+      const os = n.os || m.os || "unknown";
+      const osVersion = n.os_version || m.os_version || "";
+
+      console.log(`[heartbeat] Auto-creating asset for ${body.agent_id} (${hostname})`);
+
       const ipAddresses = n.ip_addresses ? JSON.stringify(n.ip_addresses) : "[]";
       const macAddresses = n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]";
 
@@ -113,29 +140,17 @@ export default defineHandler(async (event) => {
              status, last_seen_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
           [
-            body.agent_id,
-            hostname,
-            os,
-            osVersion,
-            "unknown",
-            macAddresses,
-            ipAddresses,
-            m.cpu_model || "Unknown",
-            m.cpu_cores || 0,
-            m.ram_total_bytes || 0,
-            m.storage_total_bytes || 0,
-            m.disk_model || "",
-            m.disk_type || "unknown",
-            safeMetrics.disk_health_status,
-            safeMetrics.disk_temperature_c,
-            n.wifi_ssid || "",
-            n.wifi_signal_dbm ?? null,
-            n.network_speed_mbps ?? 0,
-            "online",
+            body.agent_id, hostname, os, osVersion, "unknown",
+            macAddresses, ipAddresses,
+            m.cpu_model || "Unknown", m.cpu_cores || 0,
+            m.ram_total_bytes || 0, m.storage_total_bytes || 0,
+            m.disk_model || "", m.disk_type || "unknown",
+            safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
+            n.wifi_ssid || "", n.wifi_signal_dbm ?? null,
+            n.network_speed_mbps ?? 0, "online",
           ],
         );
       } catch (insertErr) {
-        // Might fail if columns don't match — try minimal insert
         console.warn("[heartbeat] Full insert failed, trying minimal:", insertErr);
         await query(
           `INSERT INTO assets
@@ -145,86 +160,21 @@ export default defineHandler(async (event) => {
              disk_type, status, last_seen_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
           [
-            body.agent_id,
-            hostname,
-            os,
-            osVersion,
-            "unknown",
-            macAddresses,
-            ipAddresses,
-            "Unknown",
-            0,
-            0,
-            "unknown",
-            "online",
+            body.agent_id, hostname, os, osVersion, "unknown",
+            macAddresses, ipAddresses, "Unknown", 0, 0, "unknown", "online",
           ],
         );
       }
 
-      // If we have location data, update it on the newly created asset
+      // Update location on newly created asset
       if (validLocation) {
-        const locFields = [
-          "last_location_lat=?", "last_location_lng=?",
-          "city=COALESCE(NULLIF(?, ''), city)",
-          "country=COALESCE(NULLIF(?, ''), country)",
-        ];
-        const locValues: any[] = [
-          Number(l.latitude), Number(l.longitude),
-          l.city || null, l.country || null,
-        ];
-
-        if (await columnExists("assets", "accuracy_meters")) {
-          locFields.push("accuracy_meters=?");
-          locValues.push(l.accuracy_meters ?? 0);
-        }
-        if (await columnExists("assets", "location_source")) {
-          locFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
-          locValues.push(l.source || null);
-        }
-
-        locValues.push(body.agent_id);
-        await query(
-          `UPDATE assets SET ${locFields.join(", ")} WHERE agent_id=?`,
-          locValues,
-        );
+        await updateLocation(body.agent_id, l);
       }
 
       // Update network info
-      const netFields: string[] = [];
-      const netValues: any[] = [];
-
-      if (n.wifi_ssid) { netFields.push("wifi_ssid=?"); netValues.push(n.wifi_ssid); }
-      if (n.wifi_signal_dbm != null) { netFields.push("wifi_signal_dbm=?"); netValues.push(n.wifi_signal_dbm); }
-      if (n.network_speed_mbps) { netFields.push("network_speed_mbps=?"); netValues.push(n.network_speed_mbps); }
-      if (n.ip_addresses) { netFields.push("ip_addresses=?"); netValues.push(JSON.stringify(n.ip_addresses)); }
-
-      if (await columnExists("assets", "wifi_ip") && n.wifi_ip) {
-        netFields.push("wifi_ip=?");
-        netValues.push(n.wifi_ip);
-      }
-      if (await columnExists("assets", "gateway_ip") && n.gateway_ip) {
-        netFields.push("gateway_ip=?");
-        netValues.push(n.gateway_ip);
-      }
-      if (await columnExists("assets", "ping_latency_ms")) {
-        netFields.push("ping_latency_ms=?");
-        netValues.push(m.ping_latency_ms ?? 0);
-      }
-      if (await columnExists("assets", "error_count")) {
-        netFields.push("error_count=?");
-        netValues.push(m.error_count ?? 0);
-      }
-
-      if (netFields.length > 0) {
-        netValues.push(body.agent_id);
-        await query(
-          `UPDATE assets SET ${netFields.join(", ")} WHERE agent_id=?`,
-          netValues,
-        );
-      }
+      await updateNetwork(body.agent_id, n, m);
 
       console.log(`[heartbeat] ✅ Auto-created asset for ${body.agent_id} (${hostname})`);
-
       return { ok: true, server_time: new Date().toISOString(), action: "auto_registered" };
     }
 
@@ -232,7 +182,6 @@ export default defineHandler(async (event) => {
     const oldStatus = asset.status;
     const newStatus = determineStatus(safeMetrics);
 
-    // Build UPDATE dynamically based on what columns exist
     const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
     const updateValues: any[] = [newStatus];
 
@@ -251,14 +200,12 @@ export default defineHandler(async (event) => {
         updateFields.push("accuracy_meters=?");
         updateValues.push(l.accuracy_meters ?? 0);
       }
-
       if (await columnExists("assets", "location_source")) {
         updateFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
         updateValues.push(l.source || null);
       }
     }
 
-    // Always safe columns
     updateFields.push(
       "disk_health_status=COALESCE(?, disk_health_status)",
       "disk_temperature_c=COALESCE(?, disk_temperature_c)",
@@ -274,41 +221,35 @@ export default defineHandler(async (event) => {
       n.ip_addresses ? JSON.stringify(n.ip_addresses) : null,
     );
 
-    // Optional columns
     if (await columnExists("assets", "wifi_ip")) {
       updateFields.push("wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip)");
       updateValues.push(n.wifi_ip || null);
     }
-
     if (await columnExists("assets", "gateway_ip")) {
       updateFields.push("gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip)");
       updateValues.push(n.gateway_ip || null);
     }
-
     if (await columnExists("assets", "ping_latency_ms")) {
       updateFields.push("ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))");
       updateValues.push(m.ping_latency_ms ?? 0);
     }
-
     if (await columnExists("assets", "error_count")) {
       updateFields.push("error_count=COALESCE(?, COALESCE(error_count, 0))");
       updateValues.push(m.error_count ?? 0);
     }
 
-    // Track status change
     if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
       if (await columnExists("assets", "last_status_change")) {
         updateFields.push("last_status_change=NOW()");
       }
     }
 
-    updateValues.push(body.agent_id);
+    updateValues.push(asset.agent_id);
     await query(
       `UPDATE assets SET ${updateFields.join(", ")} WHERE agent_id=?`,
       updateValues,
     );
 
-    // Send notification on status change
     if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
       notifyStatusChange(asset.hostname || body.agent_id, oldStatus, newStatus, safeMetrics).catch((e) => {
         console.error("Notification failed:", e);
@@ -323,6 +264,60 @@ export default defineHandler(async (event) => {
 
   return { ok: true, server_time: new Date().toISOString() };
 });
+
+// ── Helper: update location on asset ──
+async function updateLocation(agentId: string, l: any): Promise<void> {
+  const locFields = [
+    "last_location_lat=?", "last_location_lng=?",
+    "city=COALESCE(NULLIF(?, ''), city)",
+    "country=COALESCE(NULLIF(?, ''), country)",
+  ];
+  const locValues: any[] = [
+    Number(l.latitude), Number(l.longitude),
+    l.city || null, l.country || null,
+  ];
+
+  if (await columnExists("assets", "accuracy_meters")) {
+    locFields.push("accuracy_meters=?");
+    locValues.push(l.accuracy_meters ?? 0);
+  }
+  if (await columnExists("assets", "location_source")) {
+    locFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
+    locValues.push(l.source || null);
+  }
+
+  locValues.push(agentId);
+  await query(`UPDATE assets SET ${locFields.join(", ")} WHERE agent_id=?`, locValues);
+}
+
+// ── Helper: update network info on asset ──
+async function updateNetwork(agentId: string, n: any, m: any): Promise<void> {
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  if (n.wifi_ssid) { fields.push("wifi_ssid=?"); values.push(n.wifi_ssid); }
+  if (n.wifi_signal_dbm != null) { fields.push("wifi_signal_dbm=?"); values.push(n.wifi_signal_dbm); }
+  if (n.network_speed_mbps) { fields.push("network_speed_mbps=?"); values.push(n.network_speed_mbps); }
+  if (n.ip_addresses) { fields.push("ip_addresses=?"); values.push(JSON.stringify(n.ip_addresses)); }
+
+  if (await columnExists("assets", "wifi_ip") && n.wifi_ip) {
+    fields.push("wifi_ip=?"); values.push(n.wifi_ip);
+  }
+  if (await columnExists("assets", "gateway_ip") && n.gateway_ip) {
+    fields.push("gateway_ip=?"); values.push(n.gateway_ip);
+  }
+  if (await columnExists("assets", "ping_latency_ms")) {
+    fields.push("ping_latency_ms=?"); values.push(m.ping_latency_ms ?? 0);
+  }
+  if (await columnExists("assets", "error_count")) {
+    fields.push("error_count=?"); values.push(m.error_count ?? 0);
+  }
+
+  if (fields.length > 0) {
+    values.push(agentId);
+    await query(`UPDATE assets SET ${fields.join(", ")} WHERE agent_id=?`, values);
+  }
+}
 
 function determineStatus(m: any): "online" | "warning" | "critical" {
   if (!m) return "online";
