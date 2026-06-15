@@ -18,7 +18,7 @@ var (
 	serverURL = flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
 	apiKey    = flag.String("apikey", "", "API key for authentication")
 	hostname  = flag.String("hostname", "", "Override hostname")
-	interval  = flag.Int("interval", 60, "Heartbeat interval in seconds")
+	interval  = flag.Int("interval", 3, "Heartbeat interval in seconds")
 	version   = "1.0.0"
 	agentID   string
 	startTime time.Time
