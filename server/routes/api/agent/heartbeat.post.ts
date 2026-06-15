@@ -1,6 +1,6 @@
 import { defineHandler } from "nitro";
 import { readBody, createError } from "nitro/h3";
-import { queryOne, query, insertMetrics, insertLocation, insertErrorLogs, ensureV6Schema } from "../../../db/mysql";
+import { queryOne, query, insertMetrics, insertLocation, insertErrorLogs, ensureV6Schema, columnExists } from "../../../db/mysql";
 import { validateApiKeyByValue } from "../../../lib/auth";
 import { notifyStatusChange } from "../../../services/notifications";
 
@@ -95,48 +95,76 @@ export default defineHandler(async (event) => {
       const oldStatus = asset.status;
       const newStatus = determineStatus(safeMetrics);
 
+      // Build UPDATE dynamically based on what columns exist in the assets table
       const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
       const updateValues: any[] = [newStatus];
 
       if (validLocation) {
         updateFields.push(
           "last_location_lat=?", "last_location_lng=?",
-          "accuracy_meters=COALESCE(?, accuracy_meters)",
-          "location_source=COALESCE(NULLIF(?,''), location_source)",
           "city=COALESCE(NULLIF(?, ''), city)",
           "country=COALESCE(NULLIF(?, ''), country)",
         );
         updateValues.push(
           Number(l.latitude), Number(l.longitude),
-          l.accuracy_meters ?? 0, l.source || null,
           l.city || null, l.country || null,
         );
+
+        // Only add accuracy_meters if the column exists
+        if (await columnExists("assets", "accuracy_meters")) {
+          updateFields.push("accuracy_meters=?");
+          updateValues.push(l.accuracy_meters ?? 0);
+        }
+
+        // Only add location_source if the column exists
+        if (await columnExists("assets", "location_source")) {
+          updateFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
+          updateValues.push(l.source || null);
+        }
       }
 
+      // Always safe columns
       updateFields.push(
         "disk_health_status=COALESCE(?, disk_health_status)",
         "disk_temperature_c=COALESCE(?, disk_temperature_c)",
         "wifi_ssid=COALESCE(NULLIF(?, ''), wifi_ssid)",
         "wifi_signal_dbm=COALESCE(?, wifi_signal_dbm)",
-        "wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip)",
-        "gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip)",
         "network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0))",
-        "ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))",
-        "error_count=COALESCE(?, COALESCE(error_count, 0))",
         "ip_addresses=COALESCE(?, ip_addresses)",
       );
       updateValues.push(
         safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
         n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
-        n.wifi_ip || null, n.gateway_ip || null,
         n.network_speed_mbps ?? null,
-        m.ping_latency_ms ?? 0, m.error_count ?? 0,
         n.ip_addresses ? JSON.stringify(n.ip_addresses) : null,
       );
 
+      // Optional columns — only update if they exist
+      if (await columnExists("assets", "wifi_ip")) {
+        updateFields.push("wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip)");
+        updateValues.push(n.wifi_ip || null);
+      }
+
+      if (await columnExists("assets", "gateway_ip")) {
+        updateFields.push("gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip)");
+        updateValues.push(n.gateway_ip || null);
+      }
+
+      if (await columnExists("assets", "ping_latency_ms")) {
+        updateFields.push("ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))");
+        updateValues.push(m.ping_latency_ms ?? 0);
+      }
+
+      if (await columnExists("assets", "error_count")) {
+        updateFields.push("error_count=COALESCE(?, COALESCE(error_count, 0))");
+        updateValues.push(m.error_count ?? 0);
+      }
+
       // Track status change
       if (oldStatus !== newStatus && (newStatus === "warning" || newStatus === "critical")) {
-        updateFields.push("last_status_change=NOW()");
+        if (await columnExists("assets", "last_status_change")) {
+          updateFields.push("last_status_change=NOW()");
+        }
       }
 
       updateValues.push(body.agent_id);

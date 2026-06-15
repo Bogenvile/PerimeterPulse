@@ -90,7 +90,6 @@ async function safeAddColumn(
   column: string,
   definition: string,
 ): Promise<boolean> {
-  // First check if column already exists
   const exists = await columnExists(table, column);
   if (exists) {
     console.log(`[migration] Column ${table}.${column} already exists, skipping`);
@@ -159,8 +158,10 @@ export async function ensureV6Schema(): Promise<void> {
 
   console.log("[migration] Running v6 schema check...");
 
-  // 1. Tags column — add if missing
-  const tagsOk = await safeAddColumn("assets", "tags", "JSON DEFAULT ('[]')");
+  const results: boolean[] = [];
+
+  // 1. Tags column
+  results.push(await safeAddColumn("assets", "tags", "JSON DEFAULT ('[]')"));
 
   // 2. App settings table
   try {
@@ -175,51 +176,39 @@ export async function ensureV6Schema(): Promise<void> {
     console.log("[migration] ✅ app_settings table ready");
   } catch (err) {
     console.error("[migration] ❌ Failed to create app_settings:", err);
+    results.push(false);
   }
 
-  // 3. Last status change column
-  const statusChangeOk = await safeAddColumn("assets", "last_status_change", "DATETIME DEFAULT NULL");
+  // 3. Assets table columns
+  results.push(await safeAddColumn("assets", "last_status_change", "DATETIME DEFAULT NULL"));
+  results.push(await safeAddColumn("assets", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0"));
+  results.push(await safeAddColumn("assets", "location_source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"));
+  results.push(await safeAddColumn("assets", "wifi_ip", "VARCHAR(45) DEFAULT ''"));
+  results.push(await safeAddColumn("assets", "gateway_ip", "VARCHAR(45) DEFAULT ''"));
+  results.push(await safeAddColumn("assets", "ping_latency_ms", "DOUBLE DEFAULT 0"));
+  results.push(await safeAddColumn("assets", "error_count", "INT DEFAULT 0"));
 
-  // 4. Ensure agent_locations has accuracy_meters column
-  const accuracyOk = await safeAddColumn("agent_locations", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0");
+  // 4. Agent locations table columns
+  results.push(await safeAddColumn("agent_locations", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0"));
+  results.push(await safeAddColumn("agent_locations", "source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"));
 
-  // 5. Ensure agent_locations has source column
-  const sourceOk = await safeAddColumn("agent_locations", "source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'");
+  // 5. Agent metrics table columns
+  results.push(await safeAddColumn("agent_metrics", "ping_latency_ms", "DOUBLE DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "error_count", "INT DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "disk_health_status", "VARCHAR(32) DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "disk_temperature_c", "DOUBLE DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "gateway_reachable", "TINYINT(1) DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "dns_working", "TINYINT(1) DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "internet_reachable", "TINYINT(1) DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "default_gateway", "VARCHAR(45) DEFAULT NULL"));
 
-  // 6. Ensure agent_metrics has ping_latency_ms column
-  const pingOk = await safeAddColumn("agent_metrics", "ping_latency_ms", "DOUBLE DEFAULT NULL");
-
-  // 7. Ensure agent_metrics has error_count column
-  const errorCountOk = await safeAddColumn("agent_metrics", "error_count", "INT DEFAULT NULL");
-
-  // 8. Ensure agent_metrics has disk columns
-  const diskHealthOk = await safeAddColumn("agent_metrics", "disk_health_status", "VARCHAR(32) DEFAULT NULL");
-  const diskTempOk = await safeAddColumn("agent_metrics", "disk_temperature_c", "DOUBLE DEFAULT NULL");
-
-  // 9. Ensure agent_metrics has network diagnostic columns
-  const gwOk = await safeAddColumn("agent_metrics", "gateway_reachable", "TINYINT(1) DEFAULT NULL");
-  const dnsOk = await safeAddColumn("agent_metrics", "dns_working", "TINYINT(1) DEFAULT NULL");
-  const inetOk = await safeAddColumn("agent_metrics", "internet_reachable", "TINYINT(1) DEFAULT NULL");
-  const gwIpOk = await safeAddColumn("agent_metrics", "default_gateway", "VARCHAR(45) DEFAULT NULL");
-
-  // 10. Ensure assets has network columns
-  const wifiIpOk = await safeAddColumn("assets", "wifi_ip", "VARCHAR(45) DEFAULT ''");
-  const gwIpAssetOk = await safeAddColumn("assets", "gateway_ip", "VARCHAR(45) DEFAULT ''");
-  const pingAssetOk = await safeAddColumn("assets", "ping_latency_ms", "DOUBLE DEFAULT 0");
-  const errCountAssetOk = await safeAddColumn("assets", "error_count", "INT DEFAULT 0");
-
-  // Check if any migration failed
-  const allOk = tagsOk && statusChangeOk && accuracyOk && sourceOk &&
-    pingOk && errorCountOk && diskHealthOk && diskTempOk &&
-    gwOk && dnsOk && inetOk && gwIpOk &&
-    wifiIpOk && gwIpAssetOk && pingAssetOk && errCountAssetOk;
+  const allOk = results.every((r) => r);
 
   if (allOk) {
     v6Done = true;
     console.log("[migration] ✅ v6 schema check complete — all migrations successful");
   } else {
     console.error("[migration] ⚠️ Some migrations failed — will retry on next request");
-    // Don't set v6Done = true so it retries
   }
 }
 
