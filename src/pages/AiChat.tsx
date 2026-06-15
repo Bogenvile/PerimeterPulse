@@ -38,22 +38,50 @@ export default function AiChatPage() {
       const msg = (content || input).trim();
       if (!msg || loading) return;
 
-      setMessages((prev) => [...prev, { role: "user", content: msg }]);
+      const userMessage: Message = { role: "user", content: msg };
+      setMessages((prev) => [...prev, userMessage]);
       setInput("");
       setLoading(true);
 
       try {
         if (token) setApiToken(token);
         const response = await sendAiMessage(msg);
-        const reply = response?.reply || "No response received from AI.";
-        setMessages((prev) => [...prev, { role: "ai", content: reply }]);
+
+        // Extract reply - handle different response formats
+        let replyText = "";
+        if (response) {
+          if (typeof response === "string") {
+            replyText = response;
+          } else if (typeof response === "object" && response !== null) {
+            // Try common response keys
+            replyText =
+              (response as Record<string, unknown>).reply as string ||
+              (response as Record<string, unknown>).content as string ||
+              (response as Record<string, unknown>).message as string ||
+              (response as Record<string, unknown>).text as string ||
+              "";
+          }
+        }
+
+        console.log("[AI Chat] Raw response:", response);
+        console.log("[AI Chat] Extracted reply:", replyText);
+
+        if (!replyText || replyText.trim() === "") {
+          replyText = "⚠️ AI returned an empty response. Please check your AI provider settings.";
+        }
+
+        const aiMessage: Message = { role: "ai", content: replyText };
+        setMessages((prev) => [...prev, aiMessage]);
       } catch (err) {
         const errMsg =
           err instanceof Error ? err.message : "Unknown error occurred";
-        setMessages((prev) => [
-          ...prev,
-          { role: "ai", content: `⚠️ ${errMsg}`, isError: true },
-        ]);
+        console.error("[AI Chat] Error:", errMsg);
+        const errorMessage: Message = {
+          role: "ai",
+          content: `⚠️ ${errMsg}`,
+          isError: true,
+        };
+        setMessages((prev) => [...prev, errorMessage]);
       } finally {
         setLoading(false);
       }
@@ -96,7 +124,7 @@ export default function AiChatPage() {
 
           {messages.map((msg, i) => (
             <div
-              key={i}
+              key={`msg-${i}`}
               className={`flex gap-3 ${
                 msg.role === "user" ? "justify-end" : "justify-start"
               }`}
@@ -124,16 +152,18 @@ export default function AiChatPage() {
                   {msg.role === "user" ? (
                     <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
                   ) : msg.isError ? (
-                    <div className="text-sm text-destructive whitespace-pre-wrap">
+                    <div className="text-sm text-destructive whitespace-pre-wrap break-words">
                       {msg.content}
                     </div>
                   ) : (
-                    <AiMarkdown content={msg.content} />
+                    <div className="min-h-[1.5rem]">
+                      <AiMarkdown content={msg.content} />
+                    </div>
                   )}
                 </div>
 
                 {/* Copy button for AI responses */}
-                {msg.role === "ai" && !msg.isError && (
+                {msg.role === "ai" && !msg.isError && msg.content && (
                   <CopyButton text={msg.content} />
                 )}
               </div>
