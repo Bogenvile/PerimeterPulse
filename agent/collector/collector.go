@@ -12,7 +12,7 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/shirou/gopsutil/v3/net"
+	gopsnet "github.com/shirou/gopsutil/v3/net"
 )
 
 // NetworkDiagnostics represents network test results
@@ -94,21 +94,25 @@ func CollectNetworkInfo() NetworkInfoResult {
 		IPAddresses:      ips,
 	}
 
-	// fallback: get from net.Interfaces if powershell didn't return anything
+	// fallback: get from gopsutil net.Interfaces if powershell didn't return anything
 	if len(result.IPAddresses) == 0 {
-		ifaces, err := net.Interfaces()
+		ifaces, err := gopsnet.Interfaces()
 		if err == nil {
 			for _, iface := range ifaces {
-				if iface.Flags&1 == 0 { // net.FlagUp
+				if !ifaceIsUp(iface.Flags) {
 					continue
 				}
-				addrs, _ := iface.Addrs()
-				for _, addr := range addrs {
-					if ipnet, ok := addr.(*net.IPNet); ok {
-						ip4 := ipnet.IP.To4()
-						if ip4 != nil && !ip4.IsLoopback() {
-							result.IPAddresses = append(result.IPAddresses, ip4.String())
-						}
+				for _, addr := range iface.Addrs {
+					ip4 := addr.Addr
+					if strings.Contains(ip4, ":") {
+						continue // skip IPv6
+					}
+					// remove network mask if present
+					if idx := strings.Index(ip4, "/"); idx != -1 {
+						ip4 = ip4[:idx]
+					}
+					if ip4 != "" && !strings.HasPrefix(ip4, "127.") {
+						result.IPAddresses = append(result.IPAddresses, ip4)
 					}
 				}
 			}
@@ -188,13 +192,13 @@ func GetCPUCores() int {
 // GetMACAddresses returns list of MAC addresses
 func GetMACAddresses() []string {
 	var macs []string
-	ifaces, err := net.Interfaces()
+	ifaces, err := gopsnet.Interfaces()
 	if err != nil {
 		return macs
 	}
 	for _, iface := range ifaces {
-		if iface.HardwareAddr != nil && len(iface.HardwareAddr) > 0 && iface.Flags&1 != 0 {
-			macs = append(macs, iface.HardwareAddr.String())
+		if iface.HardwareAddr != "" && ifaceIsUp(iface.Flags) {
+			macs = append(macs, iface.HardwareAddr)
 		}
 	}
 	return macs
@@ -202,7 +206,6 @@ func GetMACAddresses() []string {
 
 // GetOrCreateAgentID loads or creates a persistent agent ID
 func GetOrCreateAgentID(hostname string) string {
-	// Try agent directory first, fall back to current directory
 	idPath := "pulse-agent.id"
 	if _, err := os.Stat("/etc/perimeterpulse"); err == nil {
 		idPath = "/etc/perimeterpulse/pulse-agent.id"
@@ -228,4 +231,13 @@ func simpleHash32(input string) uint32 {
 		hash = hash*31 + uint32(input[i])
 	}
 	return hash
+}
+
+func ifaceIsUp(flags []string) bool {
+	for _, f := range flags {
+		if strings.EqualFold(f, "up") {
+			return true
+		}
+	}
+	return false
 }
