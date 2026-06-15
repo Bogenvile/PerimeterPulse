@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Loader2, Bot, User, Sparkles, Send, AlertCircle } from "lucide-react";
+import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { sendAiMessage, setApiToken } from "@/lib/api";
 import { AiMarkdown } from "@/components/AiMarkdown";
@@ -111,19 +111,30 @@ export default function AiChatPage() {
                 </div>
               )}
 
-              <div
-                className={`rounded-xl px-4 py-3 max-w-[85%] min-w-0 ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : msg.isError
-                      ? "bg-destructive/5 border border-destructive/20 text-foreground"
-                      : "bg-card border border-border text-foreground"
-                }`}
-              >
-                {msg.role === "user" ? (
-                  <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
-                ) : (
-                  <AiMarkdown content={msg.content} />
+              <div className="max-w-[85%] min-w-0">
+                <div
+                  className={`rounded-xl px-4 py-3 ${
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : msg.isError
+                        ? "bg-destructive/5 border border-destructive/20 text-foreground"
+                        : "bg-card border border-border text-foreground"
+                  }`}
+                >
+                  {msg.role === "user" ? (
+                    <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+                  ) : msg.isError ? (
+                    <div className="text-sm text-destructive whitespace-pre-wrap">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <AiMarkdown content={msg.content} />
+                  )}
+                </div>
+
+                {/* Copy button for AI responses */}
+                {msg.role === "ai" && !msg.isError && (
+                  <CopyButton text={msg.content} />
                 )}
               </div>
 
@@ -142,7 +153,11 @@ export default function AiChatPage() {
               </div>
               <div className="rounded-xl px-4 py-3 bg-card border border-border">
                 <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <div className="flex gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
                   <span className="text-xs text-muted-foreground">
                     Thinking...
                   </span>
@@ -175,10 +190,44 @@ export default function AiChatPage() {
             disabled={loading || !input.trim()}
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
-            <Send className="h-4 w-4" />
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+    >
+      {copied ? (
+        <>
+          <Check className="h-3 w-3 text-emerald-500" />
+          Copied
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3" />
+          Copy
+        </>
+      )}
+    </button>
   );
 }

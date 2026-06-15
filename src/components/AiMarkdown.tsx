@@ -20,6 +20,10 @@ class MarkdownErrorBoundary extends Component<
     return { hasError: true };
   }
 
+  componentDidCatch(error: Error) {
+    console.error("Markdown render error:", error);
+  }
+
   render() {
     if (this.state.hasError) {
       return (
@@ -35,115 +39,73 @@ class MarkdownErrorBoundary extends Component<
 export function AiMarkdown({ content }: AiMarkdownProps) {
   if (!content) return null;
 
+  // Trim leading/trailing whitespace that AI providers sometimes add
+  const trimmed = content.replace(/^\s+/, "").replace(/\s+$/, "");
+
   return (
-    <MarkdownErrorBoundary fallback={content}>
-      <div
-        className="ai-markdown text-sm leading-relaxed text-foreground break-words"
-        style={{
-          fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-        }}
-      >
+    <MarkdownErrorBoundary fallback={trimmed}>
+      <div className="ai-markdown prose prose-sm dark:prose-invert max-w-none break-words">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            h1: ({ children }) => (
-              <h1 className="text-lg font-bold mt-4 mb-2 text-foreground">
-                {children}
-              </h1>
+            h1: (props) => <h1 className="text-lg font-bold mt-4 mb-2" {...props} />,
+            h2: (props) => <h2 className="text-base font-semibold mt-3 mb-1.5" {...props} />,
+            h3: (props) => <h3 className="text-sm font-semibold mt-2 mb-1" {...props} />,
+            p: (props) => <p className="text-sm leading-relaxed my-1.5" {...props} />,
+            strong: (props) => <strong className="font-semibold" {...props} />,
+            em: (props) => <em className="italic" {...props} />,
+            ul: (props) => <ul className="list-disc list-outside ml-5 my-2 space-y-1" {...props} />,
+            ol: (props) => <ol className="list-decimal list-outside ml-5 my-2 space-y-1" {...props} />,
+            li: (props) => <li className="text-sm leading-relaxed" {...props} />,
+            pre: (props) => (
+              <pre
+                className="my-2 rounded-lg bg-foreground/[0.06] border border-border p-3 overflow-x-auto text-xs"
+                {...props}
+              />
             ),
-            h2: ({ children }) => (
-              <h2 className="text-base font-semibold mt-3 mb-1.5 text-foreground">
-                {children}
-              </h2>
-            ),
-            h3: ({ children }) => (
-              <h3 className="text-sm font-semibold mt-2 mb-1 text-foreground">
-                {children}
-              </h3>
-            ),
-            p: ({ children }) => (
-              <p className="text-sm leading-relaxed my-1.5 text-foreground">
-                {children}
-              </p>
-            ),
-            strong: ({ children }) => (
-              <strong className="font-semibold text-foreground">{children}</strong>
-            ),
-            em: ({ children }) => (
-              <em className="italic">{children}</em>
-            ),
-            ul: ({ children }) => (
-              <ul className="list-disc list-outside ml-5 my-2 space-y-1">
-                {children}
-              </ul>
-            ),
-            ol: ({ children }) => (
-              <ol className="list-decimal list-outside ml-5 my-2 space-y-1">
-                {children}
-              </ol>
-            ),
-            li: ({ children }) => (
-              <li className="text-sm leading-relaxed text-foreground">
-                {children}
-              </li>
-            ),
-            code: ({ className, children, ...props }) => {
+            code: (props) => {
+              const { children, className, ...rest } = props as {
+                children?: ReactNode;
+                className?: string;
+                [key: string]: unknown;
+              };
               const isBlock = className?.includes("language-");
               if (isBlock) {
                 return (
-                  <code
-                    className="block text-xs font-mono bg-foreground/[0.06] border border-border rounded-lg p-3 overflow-x-auto whitespace-pre my-2"
-                    {...props}
-                  >
+                  <code className={`block text-xs font-mono whitespace-pre ${className || ""}`} {...rest}>
                     {children}
                   </code>
                 );
               }
               return (
-                <code
-                  className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground"
-                  {...props}
-                >
+                <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded" {...rest}>
                   {children}
                 </code>
               );
             },
-            pre: ({ children }) => (
-              <pre className="my-2 rounded-lg overflow-hidden">{children}</pre>
+            blockquote: (props) => (
+              <blockquote className="border-l-2 border-primary pl-3 py-1 my-2 bg-muted/30 rounded-r text-sm" {...props} />
             ),
-            blockquote: ({ children }) => (
-              <blockquote className="border-l-2 border-primary pl-3 py-1 my-2 bg-muted/30 rounded-r text-sm">
-                {children}
-              </blockquote>
-            ),
-            table: ({ children }) => (
+            table: (props) => (
               <div className="overflow-x-auto my-3 rounded-lg border border-border">
-                <table className="w-full text-sm">{children}</table>
+                <table className="w-full text-sm" {...props} />
               </div>
             ),
-            thead: ({ children }) => (
-              <thead className="bg-muted/50">{children}</thead>
+            thead: (props) => <thead className="bg-muted/50" {...props} />,
+            th: (props) => (
+              <th className="px-3 py-2 text-left font-semibold border-b border-border text-xs" {...props} />
             ),
-            th: ({ children }) => (
-              <th className="px-3 py-2 text-left font-semibold text-foreground border-b border-border text-xs">
-                {children}
-              </th>
-            ),
-            td: ({ children }) => (
-              <td className="px-3 py-2 text-foreground border-b border-border text-xs">
-                {children}
-              </td>
+            td: (props) => (
+              <td className="px-3 py-2 border-b border-border text-xs" {...props} />
             ),
             hr: () => <hr className="my-3 border-border" />,
-            a: ({ href, children }) => (
+            a: (props) => (
               <a
-                href={href}
+                className="text-primary underline decoration-primary/30 hover:decoration-primary"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-primary underline decoration-primary/30 hover:decoration-primary"
-              >
-                {children}
-              </a>
+                {...props}
+              />
             ),
           }}
         />
