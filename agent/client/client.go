@@ -5,129 +5,180 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
 
-// HeartbeatPayload is the JSON body sent to POST /api/agent/heartbeat
-type HeartbeatPayload struct {
-	AgentID     string      `json:"agent_id"`
-	APIKey      string      `json:"api_key"`
-	Hostname    string      `json:"hostname"`
-	Metrics     interface{} `json:"metrics,omitempty"`
-	Location    interface{} `json:"location,omitempty"`
-	NetworkInfo interface{} `json:"network_info,omitempty"`
+type Client struct {
+	serverURL string
+	apiKey    string
+	agentID   string
+	hostname  string
+	http      *http.Client
 }
 
-// RegisterPayload is the JSON body sent to POST /api/agent/register
 type RegisterPayload struct {
 	Hostname          string   `json:"hostname"`
 	OS                string   `json:"os"`
 	OSVersion         string   `json:"os_version"`
 	AgentVersion      string   `json:"agent_version"`
-	APIKey            string   `json:"api_key"`
 	MACAddresses      []string `json:"mac_addresses"`
-	IPAddresses       []string `json:"ip_addresses,omitempty"`
-	AgentID           string   `json:"agent_id,omitempty"`
+	IPAddresses       []string `json:"ip_addresses"`
 	CPUModel          string   `json:"cpu_model"`
-	CPUCores          int      `json:"cpu_cores,omitempty"`
-	RAMTotalBytes     int64    `json:"ram_total_bytes"`
-	StorageTotalBytes int64    `json:"storage_total_bytes"`
-	DiskModel         string   `json:"disk_model,omitempty"`
-	DiskType          string   `json:"disk_type,omitempty"`
-	WifiSSID          string   `json:"wifi_ssid,omitempty"`
-	WifiSignalDBm     int      `json:"wifi_signal_dbm,omitempty"`
-	NetworkSpeedMbps  int      `json:"network_speed_mbps,omitempty"`
+	CPUCores          int      `json:"cpu_cores"`
+	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	DiskModel         string   `json:"disk_model"`
+	DiskType          string   `json:"disk_type"`
+	WifiSSID          string   `json:"wifi_ssid"`
+	WifiSignalDBm     int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps  int      `json:"network_speed_mbps"`
 }
 
-// CommandPayload is the JSON body for command action responses
 type CommandPayload struct {
-	AgentID  string `json:"agent_id"`
-	APIKey   string `json:"api_key"`
 	Action   string `json:"action"`
 	Output   string `json:"output,omitempty"`
 	Error    string `json:"error,omitempty"`
 	ExitCode int    `json:"exit_code,omitempty"`
 }
 
-// Client communicates with the PerimeterPulse server API.
-type Client struct {
-	ServerURL string
-	APIKey    string
-	AgentID   string
-	Hostname  string
-	client    *http.Client
-}
-
-// New creates a new API client.
 func New(serverURL, apiKey, agentID, hostname string) *Client {
 	return &Client{
-		ServerURL: serverURL,
-		APIKey:    apiKey,
-		AgentID:   agentID,
-		Hostname:  hostname,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		serverURL: serverURL,
+		apiKey:    apiKey,
+		agentID:   agentID,
+		hostname:  hostname,
+		http:      &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-// SendHeartbeat sends a heartbeat to the server.
-func (c *Client) SendHeartbeat(metrics, location, networkInfo interface{}) error {
-	payload := HeartbeatPayload{
-		AgentID:     c.AgentID,
-		APIKey:      c.APIKey,
-		Hostname:    c.Hostname,
-		Metrics:     metrics,
-		Location:    location,
-		NetworkInfo: networkInfo,
-	}
-	return c.post("/api/agent/heartbeat", payload)
-}
-
-// Register registers the agent with the server.
-func (c *Client) Register(reg RegisterPayload) error {
-	reg.APIKey = c.APIKey
-	reg.AgentID = c.AgentID
-	return c.post("/api/agent/register", reg)
-}
-
-// SendCommandResponse reports the result of a command execution.
-func (c *Client) SendCommandResponse(commandID int, payload CommandPayload) error {
-	payload.AgentID = c.AgentID
-	payload.APIKey = c.APIKey
-	return c.post(fmt.Sprintf("/api/agent/commands/%d", commandID), payload)
-}
-
-// FetchPendingCommands retrieves pending commands for this agent.
-func (c *Client) FetchPendingCommands() ([]interface{}, error) {
-	url := fmt.Sprintf("%s/api/agent/commands?agent_id=%s&api_key=%s", c.ServerURL, c.AgentID, c.APIKey)
-	resp, err := c.client.Get(url)
+func (c *Client) post(path string, body interface{}) (*http.Response, error) {
+	data, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+
+	url := c.serverURL + path
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.http.Do(req)
+}
+
+func (c *Client) Register(payload RegisterPayload) error {
+	payloadMap := map[string]interface{}{
+		"agent_id":      c.agentID,
+		"api_key":       c.apiKey,
+		"hostname":      payload.Hostname,
+		"os":            payload.OS,
+		"os_version":    payload.OSVersion,
+		"agent_version": payload.AgentVersion,
+		"mac_addresses": payload.MACAddresses,
+		"ip_addresses":  payload.IPAddresses,
+		"cpu_model":     payload.CPUModel,
+		"cpu_cores":     payload.CPUCores,
+		"ram_total_bytes":   payload.RAMTotalBytes,
+		"storage_total_bytes": payload.StorageTotalBytes,
+		"disk_model":    payload.DiskModel,
+		"disk_type":     payload.DiskType,
+		"wifi_ssid":     payload.WifiSSID,
+		"wifi_signal_dbm": payload.WifiSignalDBm,
+		"network_speed_mbps": payload.NetworkSpeedMbps,
+	}
+
+	resp, err := c.post("/api/agent/register", payloadMap)
+	if err != nil {
+		return fmt.Errorf("register request: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("commands fetch failed (%d): %s", resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("register failed (%d): %s", resp.StatusCode, string(bodyBytes))
 	}
+	return nil
+}
+
+func (c *Client) SendHeartbeat(metrics, location, network interface{}) error {
+	payload := map[string]interface{}{
+		"agent_id":     c.agentID,
+		"api_key":      c.apiKey,
+		"hostname":     c.hostname,
+		"metrics":      metrics,
+		"location":     location,
+		"network_info": network,
+	}
+
+	resp, err := c.post("/api/agent/heartbeat", payload)
+	if err != nil {
+		return fmt.Errorf("heartbeat request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("heartbeat failed (%d): %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
+}
+
+func (c *Client) FetchPendingCommands() ([]interface{}, error) {
+	url := fmt.Sprintf("%s/api/agent/commands?agent_id=%s&api_key=%s", c.serverURL, c.agentID, c.apiKey)
+	resp, err := c.http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch commands: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("fetch commands failed (%d)", resp.StatusCode)
+	}
+
 	var result struct {
 		Commands []interface{} `json:"commands"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode commands: %w", err)
 	}
 	return result.Commands, nil
 }
 
-// CheckForUpdate checks if a newer agent version is available.
-func (c *Client) CheckForUpdate(agentOS string) (version string, downloadURL string, err error) {
-	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s", c.ServerURL, c.AgentID, c.APIKey, agentOS)
-	resp, err := c.client.Get(url)
+func (c *Client) SendCommandResponse(cmdID int, payload CommandPayload) error {
+	payloadMap := map[string]interface{}{
+		"agent_id":  c.agentID,
+		"api_key":   c.apiKey,
+		"action":    payload.Action,
+		"output":    payload.Output,
+		"error":     payload.Error,
+		"exit_code": payload.ExitCode,
+	}
+
+	url := fmt.Sprintf("%s/api/agent/commands/%d", c.serverURL, cmdID)
+	data, _ := json.Marshal(payloadMap)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func (c *Client) CheckForUpdate(osName string) (version string, downloadURL string, err error) {
+	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s", c.serverURL, c.agentID, c.apiKey, osName)
+	resp, err := c.http.Get(url)
 	if err != nil {
 		return "", "", err
 	}
 	defer resp.Body.Close()
+
 	var result struct {
 		Version     string `json:"version"`
 		DownloadURL string `json:"download_url"`
@@ -136,22 +187,4 @@ func (c *Client) CheckForUpdate(agentOS string) (version string, downloadURL str
 		return "", "", err
 	}
 	return result.Version, result.DownloadURL, nil
-}
-
-func (c *Client) post(path string, body interface{}) error {
-	jsonBytes, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	url := c.ServerURL + path
-	resp, err := c.client.Post(url, "application/json", bytes.NewReader(jsonBytes))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
-	}
-	return nil
 }
