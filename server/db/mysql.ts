@@ -73,8 +73,6 @@ export function parseJsonArray(val: unknown): string[] {
   return [];
 }
 
-// ──── Tags helpers ────
-
 export function parseTagsArray(val: unknown): string[] {
   return parseJsonArray(val);
 }
@@ -91,10 +89,7 @@ async function safeAddColumn(
   definition: string,
 ): Promise<boolean> {
   const exists = await columnExists(table, column);
-  if (exists) {
-    console.log(`[migration] Column ${table}.${column} already exists, skipping`);
-    return true;
-  }
+  if (exists) return true;
 
   try {
     await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
@@ -108,10 +103,7 @@ async function safeAddColumn(
       ? (err as { code: string }).code
       : null;
 
-    if (errno === 1060 || code === "ER_DUP_FIELDNAME") {
-      console.log(`[migration] Column ${table}.${column} already exists (dup)`);
-      return true;
-    }
+    if (errno === 1060 || code === "ER_DUP_FIELDNAME") return true;
 
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[migration] ❌ FAILED to add ${table}.${column}: ${msg}`);
@@ -119,14 +111,11 @@ async function safeAddColumn(
   }
 }
 
-// Check if a column exists
 export async function columnExists(table: string, column: string): Promise<boolean> {
   try {
     const rows = await query<{ cnt: number }>(
       `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = ?
-         AND COLUMN_NAME = ?`,
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
       [table, column],
     );
     return (rows[0]?.cnt ?? 0) > 0;
@@ -135,7 +124,6 @@ export async function columnExists(table: string, column: string): Promise<boole
   }
 }
 
-// Check if a table exists
 async function tableExists(table: string): Promise<boolean> {
   try {
     const rows = await query<{ cnt: number }>(
@@ -160,10 +148,8 @@ export async function ensureV6Schema(): Promise<void> {
 
   const results: boolean[] = [];
 
-  // 1. Tags column
   results.push(await safeAddColumn("assets", "tags", "JSON DEFAULT ('[]')"));
 
-  // 2. App settings table
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS app_settings (
@@ -173,13 +159,11 @@ export async function ensureV6Schema(): Promise<void> {
         PRIMARY KEY (\`key\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    console.log("[migration] ✅ app_settings table ready");
   } catch (err) {
     console.error("[migration] ❌ Failed to create app_settings:", err);
     results.push(false);
   }
 
-  // 3. Assets table columns
   results.push(await safeAddColumn("assets", "last_status_change", "DATETIME DEFAULT NULL"));
   results.push(await safeAddColumn("assets", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0"));
   results.push(await safeAddColumn("assets", "location_source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"));
@@ -188,11 +172,9 @@ export async function ensureV6Schema(): Promise<void> {
   results.push(await safeAddColumn("assets", "ping_latency_ms", "DOUBLE DEFAULT 0"));
   results.push(await safeAddColumn("assets", "error_count", "INT DEFAULT 0"));
 
-  // 4. Agent locations table columns
   results.push(await safeAddColumn("agent_locations", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0"));
   results.push(await safeAddColumn("agent_locations", "source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"));
 
-  // 5. Agent metrics table columns
   results.push(await safeAddColumn("agent_metrics", "ping_latency_ms", "DOUBLE DEFAULT NULL"));
   results.push(await safeAddColumn("agent_metrics", "error_count", "INT DEFAULT NULL"));
   results.push(await safeAddColumn("agent_metrics", "disk_health_status", "VARCHAR(32) DEFAULT NULL"));
@@ -202,11 +184,9 @@ export async function ensureV6Schema(): Promise<void> {
   results.push(await safeAddColumn("agent_metrics", "internet_reachable", "TINYINT(1) DEFAULT NULL"));
   results.push(await safeAddColumn("agent_metrics", "default_gateway", "VARCHAR(45) DEFAULT NULL"));
 
-  const allOk = results.every((r) => r);
-
-  if (allOk) {
+  if (results.every((r) => r)) {
     v6Done = true;
-    console.log("[migration] ✅ v6 schema check complete — all migrations successful");
+    console.log("[migration] ✅ v6 schema check complete");
   } else {
     console.error("[migration] ⚠️ Some migrations failed — will retry on next request");
   }
@@ -428,44 +408,35 @@ export async function ensureErrorLogsTable(): Promise<void> {
   `);
 }
 
-// ──── Bulk Metrics Query (for AI context) ────
-
-export async function getLatestMetricsForAllAssets(): Promise<Record<string, unknown>[]> {
-  return query(`
-    SELECT
-      a.agent_id, a.hostname, a.os, a.status, a.last_seen_at,
-      a.cpu_model, a.cpu_cores,
-      a.ram_total_bytes, a.storage_total_bytes,
-      a.disk_health_status, a.disk_temperature_c,
-      a.wifi_ssid, a.network_speed_mbps,
-      a.ping_latency_ms, a.error_count,
-      m.cpu_percent, m.ram_percent, m.storage_percent,
-      m.network_status, m.network_latency_ms,
-      m.gateway_reachable, m.dns_working, m.internet_reachable
-    FROM assets a
-    LEFT JOIN LATERAL (
-      SELECT * FROM agent_metrics
-      WHERE agent_id = a.agent_id
-      ORDER BY recorded_at DESC
-      LIMIT 1
-    ) m ON true
-    ORDER BY a.hostname
-  `);
-}
+// ──── AI Context — compatible with MySQL 8.0 ────
 
 export async function getAssetSummaryContext(): Promise<string> {
-  const assets = await getLatestMetricsForAllAssets();
-  if (assets.length === 0) return "No assets registered.";
+  try {
+    // Use subquery approach compatible with MySQL 8.0 (no LATERAL JOIN)
+    const assets = await query(`
+      SELECT
+        a.agent_id, a.hostname, a.os, a.status, a.last_seen_at,
+        a.cpu_model, a.cpu_cores,
+        a.ram_total_bytes, a.storage_total_bytes,
+        a.disk_health_status, a.disk_temperature_c,
+        a.wifi_ssid, a.network_speed_mbps,
+        a.ping_latency_ms, a.error_count
+      FROM assets a
+      ORDER BY a.hostname
+    `);
 
-  let summary = `Total Assets: ${assets.length}\n\n`;
-  for (const a of assets) {
-    summary += `- ${a.hostname} (${a.os}) | Status: ${a.status}`;
-    if (a.cpu_percent != null) summary += ` | CPU: ${Number(a.cpu_percent).toFixed(1)}%`;
-    if (a.ram_percent != null) summary += ` | RAM: ${Number(a.ram_percent).toFixed(1)}%`;
-    if (a.storage_percent != null) summary += ` | Storage: ${Number(a.storage_percent).toFixed(1)}%`;
-    if (a.disk_health_status && a.disk_health_status !== "ok")
-      summary += ` | Disk: ${a.disk_health_status}`;
-    summary += `\n`;
+    if (assets.length === 0) return "No assets registered.";
+
+    let summary = `Total Assets: ${assets.length}\n\n`;
+    for (const a of assets) {
+      summary += `- ${a.hostname} (${a.os}) | Status: ${a.status}`;
+      if (a.disk_health_status && a.disk_health_status !== "ok")
+        summary += ` | Disk: ${a.disk_health_status}`;
+      summary += `\n`;
+    }
+    return summary;
+  } catch (err) {
+    console.error("[AI] getAssetSummaryContext failed:", err);
+    return "Asset data temporarily unavailable.";
   }
-  return summary;
 }

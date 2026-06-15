@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check } from "lucide-react";
+import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { sendAiMessage, setApiToken } from "@/lib/api";
 import { AiMarkdown } from "@/components/AiMarkdown";
@@ -47,41 +47,41 @@ export default function AiChatPage() {
         if (token) setApiToken(token);
         const response = await sendAiMessage(msg);
 
-        // Extract reply - handle different response formats
+        // Extract reply from any response format
         let replyText = "";
-        if (response) {
-          if (typeof response === "string") {
-            replyText = response;
-          } else if (typeof response === "object" && response !== null) {
-            // Try common response keys
-            replyText =
-              (response as Record<string, unknown>).reply as string ||
-              (response as Record<string, unknown>).content as string ||
-              (response as Record<string, unknown>).message as string ||
-              (response as Record<string, unknown>).text as string ||
-              "";
+
+        if (typeof response === "string") {
+          replyText = response;
+        } else if (response && typeof response === "object") {
+          const r = response as Record<string, unknown>;
+          replyText =
+            (typeof r.reply === "string" ? r.reply : null) ||
+            (typeof r.content === "string" ? r.content : null) ||
+            (typeof r.message === "string" ? r.message : null) ||
+            (typeof r.text === "string" ? r.text : null) ||
+            "";
+        }
+
+        // Last resort: stringify
+        if (!replyText && response) {
+          try {
+            replyText = JSON.stringify(response, null, 2);
+          } catch {
+            replyText = String(response);
           }
         }
 
-        console.log("[AI Chat] Raw response:", response);
-        console.log("[AI Chat] Extracted reply:", replyText);
-
         if (!replyText || replyText.trim() === "") {
-          replyText = "⚠️ AI returned an empty response. Please check your AI provider settings.";
+          replyText = "AI returned an empty response. Please check your AI provider settings in Settings → AI Assistant.";
         }
 
-        const aiMessage: Message = { role: "ai", content: replyText };
-        setMessages((prev) => [...prev, aiMessage]);
+        setMessages((prev) => [...prev, { role: "ai", content: replyText }]);
       } catch (err) {
-        const errMsg =
-          err instanceof Error ? err.message : "Unknown error occurred";
-        console.error("[AI Chat] Error:", errMsg);
-        const errorMessage: Message = {
-          role: "ai",
-          content: `⚠️ ${errMsg}`,
-          isError: true,
-        };
-        setMessages((prev) => [...prev, errorMessage]);
+        const errMsg = err instanceof Error ? err.message : "Unknown error";
+        setMessages((prev) => [
+          ...prev,
+          { role: "ai", content: `Error: ${errMsg}`, isError: true },
+        ]);
       } finally {
         setLoading(false);
       }
@@ -162,7 +162,6 @@ export default function AiChatPage() {
                   )}
                 </div>
 
-                {/* Copy button for AI responses */}
                 {msg.role === "ai" && !msg.isError && msg.content && (
                   <CopyButton text={msg.content} />
                 )}

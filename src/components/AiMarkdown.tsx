@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -6,44 +6,29 @@ interface AiMarkdownProps {
   content: string;
 }
 
-interface ErrorBoundaryState {
-  hasError: boolean;
-}
-
-class MarkdownErrorBoundary extends Component<
-  { children: ReactNode; fallback: string },
-  ErrorBoundaryState
-> {
-  state: ErrorBoundaryState = { hasError: false };
-
-  static getDerivedStateFromError(): ErrorBoundaryState {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error("Markdown render error:", error);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-          {this.props.fallback}
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 export function AiMarkdown({ content }: AiMarkdownProps) {
+  const [hasError, setHasError] = useState(false);
+
+  // Reset error state when content changes
+  useEffect(() => {
+    setHasError(false);
+  }, [content]);
+
   if (!content) return null;
 
-  // Trim leading/trailing whitespace that AI providers sometimes add
   const trimmed = content.replace(/^\s+/, "").replace(/\s+$/, "");
 
-  return (
-    <MarkdownErrorBoundary fallback={trimmed}>
+  // If markdown rendering failed, show as plain text
+  if (hasError) {
+    return (
+      <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+        {trimmed}
+      </div>
+    );
+  }
+
+  try {
+    return (
       <div className="ai-markdown prose prose-sm dark:prose-invert max-w-none break-words">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
@@ -65,7 +50,7 @@ export function AiMarkdown({ content }: AiMarkdownProps) {
             ),
             code: (props) => {
               const { children, className, ...rest } = props as {
-                children?: ReactNode;
+                children?: React.ReactNode;
                 className?: string;
                 [key: string]: unknown;
               };
@@ -110,6 +95,13 @@ export function AiMarkdown({ content }: AiMarkdownProps) {
           }}
         />
       </div>
-    </MarkdownErrorBoundary>
-  );
+    );
+  } catch {
+    setHasError(true);
+    return (
+      <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+        {trimmed}
+      </div>
+    );
+  }
 }
