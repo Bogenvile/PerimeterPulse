@@ -13,31 +13,6 @@ interface HeartbeatBody {
   network_info?: any;
 }
 
-// Try to extract a real hostname from the heartbeat payload
-function extractHostname(body: HeartbeatBody): string | null {
-  const candidates = [
-    body.hostname,
-    body.network_info?.hostname,
-    body.network_info?.computer_name,
-    body.network_info?.host,
-    body.network_info?.machine_name,
-    body.metrics?.hostname,
-    body.metrics?.computer_name,
-    body.metrics?.host,
-    body.metrics?.machine_name,
-  ];
-  for (const c of candidates) {
-    if (c && typeof c === "string") {
-      const trimmed = c.trim();
-      // Reject empty, localhost, and agent_id-like values
-      if (trimmed && trimmed.toLowerCase() !== "localhost" && !trimmed.startsWith("agent-")) {
-        return trimmed;
-      }
-    }
-  }
-  return null;
-}
-
 function isValidLatitude(lat: number): boolean {
   return typeof lat === "number" && !isNaN(lat) && lat >= -90 && lat <= 90 && lat !== 0;
 }
@@ -118,21 +93,22 @@ export default defineHandler(async (event) => {
     );
 
     // ── Step 2: If not found by agent_id, try matching by hostname ──
-    if (!asset) {
-      const extractedHostname = extractHostname(body);
-      if (extractedHostname) {
-        console.log(`[heartbeat] agent_id ${body.agent_id} not found, trying hostname: "${extractedHostname}"`);
+    if (!asset && body.hostname) {
+      const hn = body.hostname.trim();
+      // Only use hostname lookup if it's NOT a placeholder
+      if (!hn.startsWith("Host-")) {
+        console.log(`[heartbeat] agent_id ${body.agent_id} not found, trying hostname: "${hn}"`);
 
         const byHostname = await queryOne<{
           id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
         }>(
           `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
-          [extractedHostname],
+          [hn],
         );
 
         if (byHostname) {
           const oldAgentId = byHostname.agent_id;
-          console.log(`[heartbeat] Hostname match found: "${extractedHostname}" was ${oldAgentId}, now ${body.agent_id}`);
+          console.log(`[heartbeat] Hostname match found: "${hn}" was ${oldAgentId}, now ${body.agent_id}`);
 
           // Update agent_id on existing asset
           await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, byHostname.id]);
@@ -150,10 +126,10 @@ export default defineHandler(async (event) => {
 
     // ── Step 3: Still not found — create new asset ──
     if (!asset) {
-      const extractedHostname = extractHostname(body);
-      // Use real hostname if available, otherwise placeholder (NOT agent_id!)
       const agentSuffix = body.agent_id.replace(/^agent-/, "").slice(0, 8);
-      const hostname = extractedHostname || `Host-${agentSuffix}`;
+      const hostname = (body.hostname && body.hostname.trim() && !body.hostname.trim().startsWith("Host-"))
+        ? body.hostname.trim()
+        : `Host-${agentSuffix}`;
       const os = n.os || m.os || "unknown";
       const osVersion = n.os_version || m.os_version || "";
 
@@ -215,17 +191,19 @@ export default defineHandler(async (event) => {
     const updateValues: any[] = [newStatus];
 
     // Update hostname from payload if provided and different
-    const extractedHostname = extractHostname(body);
-    if (extractedHostname && extractedHostname !== asset.hostname) {
-      // Check no other asset already has this hostname
-      const conflict = await queryOne<{ id: string }>(
-        `SELECT id FROM assets WHERE hostname = ? AND id != ?`,
-        [extractedHostname, asset.id],
-      );
-      if (!conflict) {
-        console.log(`[heartbeat] Updating hostname for ${body.agent_id}: "${asset.hostname}" → "${extractedHostname}"`);
-        updateFields.push("hostname=?");
-        updateValues.push(extractedHostname);
+    if (body.hostname) {
+      const hn = body.hostname.trim();
+      // Only update hostname if it's not a placeholder AND different from current
+      if (hn && !hn.startsWith("Host-") && hn !== asset.hostname) {
+        const conflict = await queryOne<{ id: string }>(
+          `SELECT id FROM assets WHERE hostname = ? AND id != ?`,
+          [hn, asset.id],
+        );
+        if (!conflict) {
+          console.log(`[heartbeat] Updating hostname for ${body.agent_id}: "${asset.hostname}" → "${hn}"`);
+          updateFields.push("hostname=?");
+          updateValues.push(hn);
+        }
       }
     }
 

@@ -13,7 +13,7 @@ import (
 type HeartbeatPayload struct {
 	AgentID     string      `json:"agent_id"`
 	APIKey      string      `json:"api_key"`
-	Hostname    string      `json:"hostname,omitempty"`
+	Hostname    string      `json:"hostname"`
 	Metrics     interface{} `json:"metrics,omitempty"`
 	Location    interface{} `json:"location,omitempty"`
 	NetworkInfo interface{} `json:"network_info,omitempty"`
@@ -72,7 +72,7 @@ func New(serverURL, apiKey, agentID, hostname string) *Client {
 	}
 }
 
-// SendHeartbeat sends a heartbeat to the server including the hostname.
+// SendHeartbeat sends a heartbeat to the server.
 func (c *Client) SendHeartbeat(metrics, location, networkInfo interface{}) error {
 	payload := HeartbeatPayload{
 		AgentID:     c.AgentID,
