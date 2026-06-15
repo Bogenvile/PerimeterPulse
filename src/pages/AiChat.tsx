@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check, Settings } from "lucide-react";
+import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { sendAiMessage, setApiToken } from "@/lib/api";
 import { AiMarkdown } from "@/components/AiMarkdown";
