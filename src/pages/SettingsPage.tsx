@@ -55,6 +55,12 @@ export default function SettingsPage() {
     );
   }
 
+  const botCmds = [
+    { cmd: "/status", desc: "" },
+    { cmd: "/status <hostname>", desc: "" },
+    { cmd: "/cmd <hostname> <command>", desc: "" },
+  ];
+
   return (
     <div className="animate-fade-in space-y-6 p-6 md:p-8 max-w-3xl">
       <div className="flex items-center justify-between">
@@ -87,7 +93,7 @@ export default function SettingsPage() {
       </Section>
 
       {/* Telegram */}
-      <Section icon={<MessageCircle className="h-4 w-4" />} title="Telegram Notifications & Bot">
+      <Section icon={<MessageCircle className="h-4 w-4" />} title="Telegram Notifications">
         <div className="grid gap-4 sm:grid-cols-2">
           <FormInput
             label="Bot Token"
@@ -105,9 +111,12 @@ export default function SettingsPage() {
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           Bot commands:{" "}
-          <code className="bg-muted px-1 py-0.5 rounded">/status</code>,{" "}
-          <code className="bg-muted px-1 py-0.5 rounded">/status <hostname></code>,{" "}
-          <code className="bg-muted px-1 py-0.5 rounded">/cmd <hostname> <command></code>
+          {botCmds.map((b, i) => (
+            <span key={i}>
+              <code className="bg-muted px-1 py-0.5 rounded">{b.cmd}</code>
+              {i < botCmds.length - 1 ? ", " : ""}
+            </span>
+          ))}
         </p>
       </Section>
 
@@ -137,7 +146,7 @@ export default function SettingsPage() {
             type="password"
             value={settings.smtp_pass || ""}
             onChange={(v) => updateField("smtp_pass", v)}
-            placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;"
+            placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
           />
           <FormInput
             label="From Address"
