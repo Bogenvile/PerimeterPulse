@@ -83,41 +83,57 @@ export function tagsToJson(tags: string[]): string {
   return JSON.stringify(tags.filter((t) => t.trim().length > 0));
 }
 
+// ──── Safe column migration helper ────
+
+async function safeAddColumn(
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  try {
+    await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  } catch (err: unknown) {
+    // MySQL errno 1060 = Duplicate column name — column already exists, OK
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "errno" in err &&
+      (err as { errno: number }).errno === 1060
+    ) {
+      return;
+    }
+    // ER_DUP_FIELDNAME as a string code fallback
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      (err as { code: string }).code === "ER_DUP_FIELDNAME"
+    ) {
+      return;
+    }
+    // Any other error — log but don't crash
+    console.error(`[migration] Failed to add ${table}.${column}:`, err);
+  }
+}
+
 // ──── Auto-migration v6 ────
 
 export async function ensureV6Schema(): Promise<void> {
-  try {
-    // 1. Tags column
-    const hasTagsCol = await queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'assets' AND COLUMN_NAME = 'tags'`,
-    );
-    if (!hasTagsCol || hasTagsCol.count === 0) {
-      await query(`ALTER TABLE assets ADD COLUMN tags JSON DEFAULT '[]' AFTER country`);
-    }
+  // 1. Tags column — try to add, ignore if exists
+  await safeAddColumn("assets", "tags", "JSON DEFAULT '[]' AFTER country");
 
-    // 2. App settings table
-    await query(`
-      CREATE TABLE IF NOT EXISTS app_settings (
-        \`key\` VARCHAR(255) NOT NULL,
-        \`value\` TEXT NOT NULL,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`key\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
+  // 2. App settings table — CREATE IF NOT EXISTS is always safe
+  await query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      \`key\` VARCHAR(255) NOT NULL,
+      \`value\` TEXT NOT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (\`key\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 
-    // 3. Last status change column
-    const hasStatusCol = await queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'assets' AND COLUMN_NAME = 'last_status_change'`,
-    );
-    if (!hasStatusCol || hasStatusCol.count === 0) {
-      await query(`ALTER TABLE assets ADD COLUMN last_status_change DATETIME DEFAULT NULL AFTER status`);
-    }
-
-  } catch {
-    // ignore migration errors
-  }
+  // 3. Last status change column
+  await safeAddColumn("assets", "last_status_change", "DATETIME DEFAULT NULL AFTER status");
 }
 
 // ──── App Settings ────

@@ -6,7 +6,7 @@ import { query, parseJsonArray, ensureV6Schema } from "../../../db/mysql";
 export default defineHandler(async (event) => {
   await requireUserAuth(event);
 
-  // Ensure tags column and other v6 schema additions exist
+  // Run migration to ensure tags column exists
   await ensureV6Schema();
 
   const q = getQuery(event);
@@ -15,7 +15,6 @@ export default defineHandler(async (event) => {
     filterTags.push(...q.tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean));
   }
 
-  // Build query based on tags filter
   let sql = `SELECT id, agent_id, hostname, os, os_version, agent_version,
             mac_addresses, ip_addresses, cpu_model, cpu_cores,
             ram_total_bytes, storage_total_bytes,
@@ -29,7 +28,6 @@ export default defineHandler(async (event) => {
   const params: unknown[] = [];
 
   if (filterTags.length > 0) {
-    // Filter assets yang mengandung setidaknya satu tags dari list
     const conditions = filterTags.map(() => `JSON_CONTAINS(tags, JSON_QUOTE(?))`).join(" OR ");
     sql += ` WHERE (${conditions})`;
     params.push(...filterTags);
