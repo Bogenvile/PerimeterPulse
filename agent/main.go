@@ -109,7 +109,7 @@ func main() {
 			metrics.DNSWorking = diag.DNSWorking
 			metrics.InternetReachable = diag.InternetReachable
 			metrics.DefaultGateway = diag.DefaultGateway
-			metrics.ErrorLogs = collector.GetErrorLogs() // Collect Windows event log errors
+			metrics.ErrorLogs = collector.GetErrorLogs()
 			metrics.ErrorCount = len(metrics.ErrorLogs)
 
 			// Send heartbeat
@@ -179,7 +179,6 @@ func main() {
 					if version != "" && version != "1.0.0" {
 						log.Printf("🆕 New version available: %s", version)
 						log.Printf("📥 Download URL: %s", downloadURL)
-						// TODO: Auto-update mechanism
 					}
 				}()
 			}
