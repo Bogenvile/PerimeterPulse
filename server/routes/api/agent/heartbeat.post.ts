@@ -7,9 +7,39 @@ import { notifyStatusChange } from "../../../services/notifications";
 interface HeartbeatBody {
   agent_id: string;
   api_key: string;
+  hostname?: string;
   metrics?: any;
   location?: any;
   network_info?: any;
+}
+
+// ── Extract real hostname from anywhere in the heartbeat payload ──
+function extractHostname(body: HeartbeatBody): string | null {
+  const candidates = [
+    body.hostname,
+    body.network_info?.hostname,
+    body.network_info?.computer_name,
+    body.network_info?.host,
+    body.network_info?.machine_name,
+    body.metrics?.hostname,
+    body.metrics?.computer_name,
+    body.metrics?.host,
+    body.metrics?.machine_name,
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === "string") {
+      const trimmed = c.trim();
+      // Reject empty, localhost, and agent_id-like values
+      if (
+        trimmed &&
+        trimmed.toLowerCase() !== "localhost" &&
+        !trimmed.startsWith("agent-")
+      ) {
+        return trimmed;
+      }
+    }
+  }
+  return null;
 }
 
 function isValidLatitude(lat: number): boolean {
@@ -65,7 +95,7 @@ export default defineHandler(async (event) => {
       timestamp: m.timestamp || new Date().toISOString(),
     };
 
-    // Always store metrics & location regardless of asset existence
+    // Always store metrics regardless of asset existence
     await insertMetrics(body.agent_id, safeMetrics);
 
     if (body.metrics?.error_logs && body.metrics.error_logs.length > 0) {
@@ -83,7 +113,7 @@ export default defineHandler(async (event) => {
       });
     }
 
-    // ── Find existing asset ──
+    // ── Find existing asset by agent_id ──
     let asset = await queryOne<{
       id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
     }>(
@@ -91,40 +121,54 @@ export default defineHandler(async (event) => {
       [body.agent_id],
     );
 
-    // ── Not found by agent_id — try matching by hostname to avoid duplicates ──
+    // ── Not found by agent_id — try matching by real hostname ──
     if (!asset) {
-      const heartbeatHostname = n.hostname || m.hostname || body.agent_id;
-      const existingByHostname = await queryOne<{
-        id: string; agent_id: string; status: string; hostname: string;
-      }>(
-        `SELECT id, agent_id, status, hostname FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
-        [heartbeatHostname],
-      );
+      const extractedHostname = extractHostname(body);
 
-      if (existingByHostname) {
-        // Same hostname, different agent_id — update the agent_id to keep one asset
-        console.log(`[heartbeat] Merging: hostname "${heartbeatHostname}" already exists as ${existingByHostname.agent_id}, updating to ${body.agent_id}`);
-        await query(
-          `UPDATE assets SET agent_id = ? WHERE id = ?`,
-          [body.agent_id, existingByHostname.id],
-        );
-        // Re-fetch with new agent_id
-        asset = await queryOne<{
-          id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
+      if (extractedHostname) {
+        console.log(`[heartbeat] agent_id ${body.agent_id} not found, trying hostname match: "${extractedHostname}"`);
+
+        const existingByHostname = await queryOne<{
+          id: string; agent_id: string; status: string; hostname: string;
         }>(
-          `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
-          [body.agent_id],
+          `SELECT id, agent_id, status, hostname FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
+          [extractedHostname],
         );
+
+        if (existingByHostname) {
+          const oldAgentId = existingByHostname.agent_id;
+          console.log(`[heartbeat] Merging: hostname "${extractedHostname}" exists as ${oldAgentId}, updating to ${body.agent_id}`);
+
+          // Update agent_id on the existing asset
+          await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, existingByHostname.id]);
+
+          // Reassign all time-series data to new agent_id
+          await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+          await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+          await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+          try { await query(`UPDATE agent_commands SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]); } catch {}
+
+          // Re-fetch
+          asset = await queryOne<{
+            id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
+          }>(
+            `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE agent_id = ?`,
+            [body.agent_id],
+          );
+        }
       }
     }
 
     // ── Still not found — create new asset ──
     if (!asset) {
-      const hostname = n.hostname || m.hostname || body.agent_id;
+      const extractedHostname = extractHostname(body);
+      // Use real hostname if available, otherwise use a placeholder (NOT agent_id)
+      const agentSuffix = body.agent_id.replace(/^agent-/, "").slice(0, 8);
+      const hostname = extractedHostname || `Host-${agentSuffix}`;
       const os = n.os || m.os || "unknown";
       const osVersion = n.os_version || m.os_version || "";
 
-      console.log(`[heartbeat] Auto-creating asset for ${body.agent_id} (${hostname})`);
+      console.log(`[heartbeat] Auto-creating asset for ${body.agent_id} (hostname: "${hostname}")`);
 
       const ipAddresses = n.ip_addresses ? JSON.stringify(n.ip_addresses) : "[]";
       const macAddresses = n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]";
@@ -174,7 +218,7 @@ export default defineHandler(async (event) => {
       // Update network info
       await updateNetwork(body.agent_id, n, m);
 
-      console.log(`[heartbeat] ✅ Auto-created asset for ${body.agent_id} (${hostname})`);
+      console.log(`[heartbeat] ✅ Auto-created asset for ${body.agent_id} (hostname: "${hostname}")`);
       return { ok: true, server_time: new Date().toISOString(), action: "auto_registered" };
     }
 
