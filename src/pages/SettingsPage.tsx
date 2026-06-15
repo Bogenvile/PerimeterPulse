@@ -48,7 +48,11 @@ export default function SettingsPage() {
   }
 
   if (loading) {
-    return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
   }
 
   return (
@@ -100,7 +104,8 @@ export default function SettingsPage() {
           />
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Bot commands: <code className="bg-muted px-1 py-0.5 rounded">/status</code>,{" "}
+          Bot commands:{" "}
+          <code className="bg-muted px-1 py-0.5 rounded">/status</code>,{" "}
           <code className="bg-muted px-1 py-0.5 rounded">/status <hostname></code>,{" "}
           <code className="bg-muted px-1 py-0.5 rounded">/cmd <hostname> <command></code>
         </p>
@@ -132,7 +137,7 @@ export default function SettingsPage() {
             type="password"
             value={settings.smtp_pass || ""}
             onChange={(v) => updateField("smtp_pass", v)}
-            placeholder="••••••••"
+            placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;"
           />
           <FormInput
             label="From Address"
@@ -177,7 +182,19 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
   );
 }
 
-function FormInput({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string }) {
+function FormInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  type?: string;
+}) {
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-foreground">{label}</label>
