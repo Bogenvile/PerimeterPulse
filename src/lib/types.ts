@@ -52,6 +52,7 @@ export interface AgentLocation {
 export interface ExtendedHeartbeatPayload {
   agent_id: string;
   api_key: string;
+  hostname?: string;
   metrics: ExtendedAgentMetrics;
   location: AgentLocation;
   network_info: {
