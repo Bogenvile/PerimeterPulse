@@ -3,215 +3,230 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"perimeterpulse-agent/client"
-	"perimeterpulse-agent/collector"
-	"perimeterpulse-agent/commands"
+	"perimeterpulse/agent/buffer"
+	"perimeterpulse/agent/client"
+	"perimeterpulse/agent/collector"
+	"perimeterpulse/agent/commands"
 )
 
-var (
-	serverURL = flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
-	apiKey    = flag.String("apikey", "", "API key for authentication")
-	hostname  = flag.String("hostname", "", "Override hostname")
-	interval  = flag.Int("interval", 3, "Heartbeat interval in seconds")
-	version   = "1.0.0"
-	agentID   string
-	startTime time.Time
+const (
+	defaultServer   = "http://localhost:3000"
+	defaultInterval = 60
+	defaultAPIKey   = ""
+	idFileName      = "pulse-agent.id"
 )
-
-func init() {
-	startTime = time.Now()
-}
 
 func main() {
+	serverURL := flag.String("server", defaultServer, "PerimeterPulse server URL")
+	apiKey := flag.String("apikey", defaultAPIKey, "API key for authentication")
+	hostnameFlag := flag.String("hostname", "", "Override hostname (default: OS hostname)")
+	interval := flag.Int("interval", defaultInterval, "Heartbeat interval in seconds")
 	flag.Parse()
 
-	if *apiKey == "" {
-		log.Fatal("API key is required. Use --apikey flag")
+	// ── Hostname ──
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("Failed to get hostname: %v", err)
+	}
+	if *hostnameFlag != "" {
+		hostname = *hostnameFlag
+	}
+	log.Printf("🖥️  Hostname: %s", hostname)
+
+	// ── Agent ID (PERSISTENT) ──
+	agentID := loadOrCreateAgentID(hostname)
+	log.Printf("🆔 Agent ID: %s", agentID)
+
+	// ── API Client ──
+	c := client.New(*serverURL, *apiKey, agentID, hostname)
+
+	// ── OS Info ──
+	osInfo := collector.GetOSInfo()
+	log.Printf("💻 OS: %s %s", osInfo.OS, osInfo.OSVersion)
+
+	// ── Initial Registration ──
+	hw := collector.CollectHardware()
+	netInfo := collector.CollectNetworkInfo()
+
+	regPayload := client.RegisterPayload{
+		Hostname:          hostname,
+		OS:                osInfo.OS,
+		OSVersion:         osInfo.OSVersion,
+		AgentVersion:      "1.0.0",
+		MACAddresses:      hw.MACAddresses,
+		IPAddresses:       netInfo.IPAddresses,
+		CPUModel:          hw.CPUModel,
+		CPUCores:          hw.CPUCores,
+		RAMTotalBytes:     hw.RAMTotalBytes,
+		StorageTotalBytes: hw.StorageTotalBytes,
+		DiskModel:         hw.DiskModel,
+		DiskType:          hw.DiskType,
+		WifiSSID:          netInfo.WifiSSID,
+		WifiSignalDBm:     netInfo.WifiSignalDBm,
+		NetworkSpeedMbps:  netInfo.NetworkSpeedMbps,
 	}
 
-	// Set hostname
-	agentHostname := *hostname
-	if agentHostname == "" {
-		var err error
-		agentHostname, err = os.Hostname()
-		if err != nil {
-			log.Fatalf("Failed to get hostname: %v", err)
-		}
-	}
-
-	// Load or generate agent ID
-	agentID = collector.GetOrCreateAgentID(agentHostname)
-
-	log.Printf("🖥️  PerimeterPulse Agent v%s", version)
-	log.Printf("   Agent ID : %s", agentID)
-	log.Printf("   Hostname : %s", agentHostname)
-	log.Printf("   Server   : %s", *serverURL)
-	log.Printf("   Interval : %d seconds", *interval)
-	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-	// Initialize API client
-	apiClient := client.NewClient(*serverURL, *apiKey, version)
-
-	// Register agent
-	if err := apiClient.Register(agentID, agentHostname); err != nil {
+	if err := c.Register(regPayload); err != nil {
 		log.Printf("⚠️  Registration warning: %v", err)
+	} else {
+		log.Println("✅ Agent registered successfully")
 	}
 
-	// Start command polling in background
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			commands.ProcessCommands(*serverURL, agentID, *apiKey)
-		}
-	}()
+	// ── Offline Buffer ──
+	offlineBuffer := buffer.NewBuffer()
 
-	// Handle graceful shutdown
+	// ── Command Executor ──
+	cmdExecutor := commands.NewExecutor()
+
+	// ── Graceful Shutdown ──
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Main heartbeat loop
+	// ── Heartbeat Loop ──
 	ticker := time.NewTicker(time.Duration(*interval) * time.Second)
 	defer ticker.Stop()
 
-	// Send first heartbeat immediately
-	sendHeartbeat(apiClient, agentHostname)
+	log.Printf("🔄 Heartbeat loop started (interval: %ds)", *interval)
 
 	for {
 		select {
 		case <-ticker.C:
-			sendHeartbeat(apiClient, agentHostname)
-		case sig := <-sigChan:
-			log.Printf("🛑 Received signal %v, shutting down...", sig)
+			// Collect metrics
+			metrics := collector.CollectMetrics()
+			loc := collector.CollectLocation()
+			netInfo := collector.CollectNetworkInfo()
+
+			// Add network diag info to metrics
+			diag := collector.RunNetworkDiag(netInfo.DefaultGateway)
+			metrics.GatewayReachable = diag.GatewayReachable
+			metrics.DNSWorking = diag.DNSWorking
+			metrics.InternetReachable = diag.InternetReachable
+			metrics.DefaultGateway = diag.DefaultGateway
+			metrics.ErrorLogs = collector.GetErrorLogs() // Collect Windows event log errors
+			metrics.ErrorCount = len(metrics.ErrorLogs)
+
+			// Send heartbeat
+			if err := c.SendHeartbeat(metrics, loc, netInfo); err != nil {
+				log.Printf("❌ Heartbeat failed: %v", err)
+				// Buffer for offline
+				offlineBuffer.Store(metrics, loc, netInfo)
+			} else {
+				log.Printf("💓 Heartbeat sent | CPU:%.1f%% RAM:%.1f%% Disk:%.1f%%",
+					metrics.CPUPercent, metrics.RAMPercent, metrics.StoragePercent)
+				// Flush offline buffer
+				offlineBuffer.Flush(func(m, l, n interface{}) error {
+					return c.SendHeartbeat(m, l, n)
+				})
+			}
+
+			// Check for pending commands
+			pending, err := c.FetchPendingCommands()
+			if err != nil {
+				log.Printf("⚠️  Command check failed: %v", err)
+			} else if len(pending) > 0 {
+				for _, cmdRaw := range pending {
+					cmdMap, ok := cmdRaw.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					cmdID := int(cmdMap["id"].(float64))
+					cmdStr := cmdMap["command"].(string)
+
+					log.Printf("📥 Executing command #%d: %s", cmdID, cmdStr)
+
+					// Mark as running
+					c.SendCommandResponse(cmdID, client.CommandPayload{
+						Action: "start",
+					})
+
+					// Execute
+					output, execErr, exitCode := cmdExecutor.Execute(cmdStr)
+
+					// Send result
+					action := "complete"
+					errStr := ""
+					if execErr != nil {
+						action = "fail"
+						errStr = execErr.Error()
+					}
+
+					c.SendCommandResponse(cmdID, client.CommandPayload{
+						Action:   action,
+						Output:   output,
+						Error:    errStr,
+						ExitCode: exitCode,
+					})
+
+					log.Printf("✅ Command #%d completed (exit: %d)", cmdID, exitCode)
+				}
+			}
+
+			// Check for agent updates (every 10 heartbeats / 10 minutes)
+			if time.Now().Minute()%10 == 0 {
+				go func() {
+					version, downloadURL, err := c.CheckForUpdate(osInfo.OS)
+					if err != nil {
+						log.Printf("⚠️  Update check failed: %v", err)
+						return
+					}
+					if version != "" && version != "1.0.0" {
+						log.Printf("🆕 New version available: %s", version)
+						log.Printf("📥 Download URL: %s", downloadURL)
+						// TODO: Auto-update mechanism
+					}
+				}()
+			}
+
+		case <-sigChan:
+			log.Println("🛑 Shutting down agent...")
+			ticker.Stop()
 			return
 		}
 	}
 }
 
-func sendHeartbeat(apiClient *client.Client, hostname string) {
-	// Collect hardware metrics
-	cpuPercent, err := collector.GetCPUPercent()
-	if err != nil {
-		log.Printf("⚠️  Failed to get CPU: %v", err)
-		cpuPercent = 0
-	}
-
-	ramPercent, ramUsed, ramTotal, err := collector.GetRAMInfo()
-	if err != nil {
-		log.Printf("⚠️  Failed to get RAM: %v", err)
-		ramPercent, ramUsed, ramTotal = 0, 0, 0
-	}
-
-	storagePercent, storageUsed, storageTotal, err := collector.GetStorageInfo()
-	if err != nil {
-		log.Printf("⚠️  Failed to get Storage: %v", err)
-		storagePercent, storageUsed, storageTotal = 0, 0, 0
-	}
-
-	uptimeSeconds, err := collector.GetSystemUptime()
-	if err != nil {
-		uptimeSeconds = 0
-	}
-
-	// Collect network info
-	networkInfo := collector.CollectNetworkInfo()
-
-	// Collect location - HANYA jika valid
-	var location *collector.LocationData
-	loc := collector.GetLocation()
-	if loc.Latitude != 0 || loc.Longitude != 0 {
-		location = &loc
-		log.Printf("📍 Location: %.4f, %.4f (source: %s, accuracy: %.0fm)",
-			loc.Latitude, loc.Longitude, loc.Source, loc.AccuracyMeters)
-	} else {
-		log.Printf("📍 Location: not available")
-	}
-
-	// Collect disk health (SMART)
-	diskHealth, diskTemp := collector.GetDiskHealth()
-
-	// Collect network diagnostics
-	diag := collector.RunNetworkDiagnostics()
-
-	// Build heartbeat payload
-	payload := client.HeartbeatPayload{
-		AgentID: agentID,
-		APIKey:  *apiKey,
-		Metrics: client.MetricsData{
-			CPUPercent:        cpuPercent,
-			RAMPercent:        ramPercent,
-			RAMUsedBytes:      ramUsed,
-			RAMTotalBytes:     ramTotal,
-			StoragePercent:    storagePercent,
-			StorageUsedBytes:  storageUsed,
-			StorageTotalBytes: storageTotal,
-			UptimeSeconds:     int(uptimeSeconds),
-			NetworkStatus:     diag.Status,
-			NetworkLatencyMs:  diag.LatencyMs,
-			PingLatencyMs:     diag.PingLatencyMs,
-			ErrorCount:        0,
-			// Network Diagnostics
-			GatewayReachable:   diag.GatewayReachable,
-			DNSWorking:         diag.DNSWorking,
-			InternetReachable:  diag.InternetReachable,
-			DefaultGateway:     diag.DefaultGateway,
-			DiskHealthStatus:   diskHealth,
-			DiskTemperatureC:   diskTemp,
-			Timestamp:          time.Now().UTC().Format(time.RFC3339),
-		},
-		NetworkInfo: client.NetworkInfoData{
-			WiFiSSID:         networkInfo.WiFiSSID,
-			WiFiSignalDBM:    networkInfo.WiFiSignalDBM,
-			NetworkSpeedMbps: networkInfo.NetworkSpeedMbps,
-			IPAddresses:      networkInfo.IPAddresses,
-			WiFiIP:           networkInfo.WiFiIP,
-			GatewayIP:        networkInfo.GatewayIP,
-		},
-	}
-
-	// Hanya sertakan location jika valid
-	if location != nil {
-		payload.Location = &client.LocationData{
-			Latitude:       location.Latitude,
-			Longitude:      location.Longitude,
-			AccuracyMeters: location.AccuracyMeters,
-			Source:         location.Source,
-			City:           location.City,
-			Country:        location.Country,
-			Timestamp:      location.Timestamp,
+// loadOrCreateAgentID loads a persistent agent ID from file, or creates a new one.
+func loadOrCreateAgentID(hostname string) string {
+	// Try to load from file
+	data, err := os.ReadFile(idFileName)
+	if err == nil {
+		var saved struct {
+			AgentID  string `json:"agent_id"`
+			Hostname string `json:"hostname"`
 		}
-	} else {
-		// Jangan kirim lokasi sama sekali jika tidak valid
-		payload.Location = nil
+		if json.Unmarshal(data, &saved) == nil && saved.AgentID != "" {
+			log.Printf("📂 Loaded existing agent ID from %s", idFileName)
+			return saved.AgentID
+		}
 	}
 
-	// Send heartbeat
-	_, err = apiClient.Heartbeat(&payload)
-	if err != nil {
-		log.Printf("❌ Heartbeat failed: %v", err)
-		return
+	// Create new agent ID (based on hostname + MAC for uniqueness)
+	hw := collector.CollectHardware()
+	agentID := collector.GenerateAgentID(hostname, hw.MACAddresses)
+
+	// Save to file
+	saved := struct {
+		AgentID  string `json:"agent_id"`
+		Hostname string `json:"hostname"`
+	}{
+		AgentID:  agentID,
+		Hostname: hostname,
 	}
 
-	log.Printf("✅ Heartbeat sent (CPU: %.1f%%, RAM: %.1f%%, Disk: %s, Net: %s)",
-		cpuPercent, ramPercent, diskHealth, diag.Status)
-}
+	if data, err := json.MarshalIndent(saved, "", "  "); err == nil {
+		if err := os.WriteFile(idFileName, data, 0644); err != nil {
+			log.Printf("⚠️  Failed to save agent ID: %v", err)
+		} else {
+			log.Printf("💾 Agent ID saved to %s", idFileName)
+		}
+	}
 
-// Export fungsi untuk digunakan oleh collector
-func GetVersion() string {
-	return version
-}
-
-func GetStartTime() time.Time {
-	return startTime
-}
-
-// Helper untuk JSON unmarshaling (digunakan di collector)
-func jsonUnmarshal(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
+	return agentID
 }
