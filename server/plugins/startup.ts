@@ -3,7 +3,7 @@ import { startTelegramBot } from "./telegram-bot";
 
 let started = false;
 
-export default defineNitroPlugin(async () => {
+export default defineNitroPlugin(async (nitroApp) => {
   if (started) return;
   started = true;
 

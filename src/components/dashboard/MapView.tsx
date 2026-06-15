@@ -3,6 +3,20 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { AgentStatus } from "@/lib/types";
 
+// Fix: Leaflet dalam iframe mencoba akses window.frameElement
+// yang tidak tersedia di beberapa environment.
+// Polyfill untuk mencegah error "Cannot read properties of undefined (reading 'frame')"
+if (typeof window !== "undefined" && !window.frameElement && window.parent) {
+  try {
+    Object.defineProperty(window, "frameElement", {
+      get: () => null,
+      configurable: true,
+    });
+  } catch {
+    // ignore if not configurable
+  }
+}
+
 interface MappableAsset {
   id: string;
   hostname: string;
@@ -103,24 +117,28 @@ export function MapView({
     const timer = setTimeout(() => {
       if (!containerRef.current) return;
 
-      const map = L.map(containerRef.current, {
-        center,
-        zoom,
-        zoomControl: true,
-        attributionControl: false,
-      });
+      try {
+        const map = L.map(containerRef.current, {
+          center,
+          zoom,
+          zoomControl: true,
+          attributionControl: false,
+        });
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      }).addTo(map);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+        }).addTo(map);
 
-      markersRef.current.addTo(map);
-      mapRef.current = map;
+        markersRef.current.addTo(map);
+        mapRef.current = map;
 
-      requestAnimationFrame(() => {
-        map.invalidateSize();
-        setMapReady(true);
-      });
+        requestAnimationFrame(() => {
+          map.invalidateSize();
+          setMapReady(true);
+        });
+      } catch (err) {
+        console.error("Map init error:", err);
+      }
     }, 100);
 
     return () => {
