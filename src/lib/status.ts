@@ -1,6 +1,6 @@
 import type { ExtendedAsset, AgentStatus } from "./types";
 
-const OFFLINE_THRESHOLD_MINUTES = 3;
+const OFFLINE_THRESHOLD_MINUTES = 5;
 
 export function computeEffectiveStatus(asset: ExtendedAsset): AgentStatus {
   if (!asset.last_seen_at) return "offline";
