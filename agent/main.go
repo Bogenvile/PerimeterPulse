@@ -1,358 +1,221 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"perimeterpulse/agent/client"
-	"perimeterpulse/agent/collector"
+	"perimeterpulse-agent/client"
+	"perimeterpulse-agent/collector"
+	"perimeterpulse-agent/commands"
 )
-
-const agentVersion = "1.0.0"
 
 var (
-	serverURL = flag.String("server", "", "PerimeterPulse server URL")
-	apiKey    = flag.String("apikey", "", "API key for authentication")
-	hostname  = flag.String("hostname", "", "Override hostname")
-	interval  = flag.Int("interval", 3, "Heartbeat interval in seconds")
+	serverURL  = flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
+	apiKey     = flag.String("apikey", "", "API key for authentication")
+	hostname   = flag.String("hostname", "", "Override hostname")
+	interval   = flag.Int("interval", 60, "Heartbeat interval in seconds")
+	version    = "1.0.0"
+	agentID    string
+	startTime  time.Time
 )
 
-// Command from server
-type PendingCommand struct {
-	ID        int    `json:"id"`
-	Command   string `json:"command"`
-	CreatedAt string `json:"created_at"`
-}
-
-type CommandsResponse struct {
-	Commands []PendingCommand `json:"commands"`
-}
-
-// Update check response
-type UpdateResponse struct {
-	Version     string `json:"version"`
-	DownloadURL string `json:"download_url"`
+func init() {
+	startTime = time.Now()
 }
 
 func main() {
 	flag.Parse()
-	if *serverURL == "" || *apiKey == "" {
-		log.Fatal("--server and --apikey are required")
+
+	if *apiKey == "" {
+		log.Fatal("API key is required. Use --apikey flag")
 	}
-	*serverURL = strings.TrimRight(*serverURL, "/")
 
-	agentID := loadAgentID()
-	info := collector.CollectInfo(*apiKey, *hostname)
-	info.AgentVersion = agentVersion
-
-	resp, err := client.RegisterAgent(*serverURL, info, agentID)
-	if err != nil {
-		log.Fatalf("registration failed: %v", err)
+	// Set hostname
+	agentHostname := *hostname
+	if agentHostname == "" {
+		var err error
+		agentHostname, err = os.Hostname()
+		if err != nil {
+			log.Fatalf("Failed to get hostname: %v", err)
+		}
 	}
-	if resp.AgentID != "" {
-		agentID = resp.AgentID
-		saveAgentID(agentID)
+
+	// Load or generate agent ID
+	agentID = collector.GetOrCreateAgentID(agentHostname)
+
+	log.Printf("🖥️  PerimeterPulse Agent v%s", version)
+	log.Printf("   Agent ID : %s", agentID)
+	log.Printf("   Hostname : %s", agentHostname)
+	log.Printf("   Server   : %s", *serverURL)
+	log.Printf("   Interval : %d seconds", *interval)
+	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+	// Initialize API client
+	apiClient := client.NewClient(*serverURL, *apiKey, version)
+
+	// Register agent
+	if err := apiClient.Register(agentID, agentHostname); err != nil {
+		log.Printf("⚠️  Registration warning: %v", err)
 	}
-	fmt.Printf("Registered as agent %s (hostname: %s, v%s)\n", agentID, info.Hostname, agentVersion)
 
-	// Check for updates on startup
-	go checkAndUpdate(agentID)
+	// Start command executor
+	cmdExecutor := commands.NewExecutor(apiClient, agentID)
+	go cmdExecutor.Start()
 
-	sendHeartbeat(agentID)
-	processCommands(agentID)
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Main heartbeat loop
 	ticker := time.NewTicker(time.Duration(*interval) * time.Second)
 	defer ticker.Stop()
-	fmt.Printf("Sending heartbeat every %ds...\n", *interval)
 
-	updateCheckCount := 0
-	for range ticker.C {
-		sendHeartbeat(agentID)
-		processCommands(agentID)
+	// Send first heartbeat immediately
+	sendHeartbeat(apiClient, agentHostname)
 
-		// Check for updates every 60 heartbeats (~3 minutes at 3s interval)
-		updateCheckCount++
-		if updateCheckCount >= 60 {
-			updateCheckCount = 0
-			go checkAndUpdate(agentID)
+	for {
+		select {
+		case <-ticker.C:
+			sendHeartbeat(apiClient, agentHostname)
+		case sig := <-sigChan:
+			log.Printf("🛑 Received signal %v, shutting down...", sig)
+			return
 		}
 	}
 }
 
-func sendHeartbeat(agentID string) {
-	metrics := collector.CollectMetrics()
-	location := collector.CollectLocation()
-	network := collector.CollectNetwork()
-
-	hb := client.HeartbeatPayload{
-		AgentID:     agentID,
-		APIKey:      *apiKey,
-		Metrics:     metrics,
-		Location:    location,
-		NetworkInfo: network,
+func sendHeartbeat(apiClient *client.Client, hostname string) {
+	// Collect hardware metrics
+	cpuPercent, err := collector.GetCPUPercent()
+	if err != nil {
+		log.Printf("⚠️  Failed to get CPU: %v", err)
+		cpuPercent = 0
 	}
 
-	if err := client.SendHeartbeat(*serverURL, hb); err != nil {
-		log.Printf("heartbeat error: %v", err)
+	ramPercent, ramUsed, ramTotal, err := collector.GetRAMInfo()
+	if err != nil {
+		log.Printf("⚠️  Failed to get RAM: %v", err)
+		ramPercent, ramUsed, ramTotal = 0, 0, 0
+	}
+
+	storagePercent, storageUsed, storageTotal, err := collector.GetStorageInfo()
+	if err != nil {
+		log.Printf("⚠️  Failed to get Storage: %v", err)
+		storagePercent, storageUsed, storageTotal = 0, 0, 0
+	}
+
+	uptimeSeconds, err := collector.GetSystemUptime()
+	if err != nil {
+		uptimeSeconds = 0
+	}
+
+	// Collect network info
+	networkInfo := collector.CollectNetworkInfo()
+
+	// Collect location - HANYA jika valid
+	var location *collector.LocationData
+	loc, err := collector.CollectLocation()
+	if err != nil {
+		log.Printf("📍 Location: not available (%v)", err)
+	} else if loc != nil {
+		location = loc
+		log.Printf("📍 Location: %.4f, %.4f (source: %s, accuracy: %.0fm)",
+			loc.Latitude, loc.Longitude, loc.Source, loc.AccuracyMeters)
+	}
+
+	// Collect disk health (SMART)
+	diskHealth, diskTemp := collector.GetDiskHealth()
+
+	// Collect network diagnostics
+	diag := collector.RunNetworkDiagnostics()
+
+	// Build heartbeat payload
+	payload := client.HeartbeatPayload{
+		AgentID: agentID,
+		APIKey:  *apiKey,
+		Metrics: client.MetricsData{
+			CPUPercent:        cpuPercent,
+			RAMPercent:        ramPercent,
+			RAMUsedBytes:      ramUsed,
+			RAMTotalBytes:     ramTotal,
+			StoragePercent:    storagePercent,
+			StorageUsedBytes:  storageUsed,
+			StorageTotalBytes: storageTotal,
+			UptimeSeconds:     int(uptimeSeconds),
+			NetworkStatus:     diag.Status,
+			NetworkLatencyMs:  diag.LatencyMs,
+			PingLatencyMs:     diag.PingLatencyMs,
+			ErrorCount:        0,
+			// Network Diagnostics
+			GatewayReachable:   diag.GatewayReachable,
+			DNSWorking:         diag.DNSWorking,
+			InternetReachable:  diag.InternetReachable,
+			DefaultGateway:     diag.DefaultGateway,
+			DiskHealthStatus:   diskHealth,
+			DiskTemperatureC:   diskTemp,
+			Timestamp:          time.Now().UTC().Format(time.RFC3339),
+		},
+		NetworkInfo: client.NetworkInfoData{
+			WiFiSSID:        networkInfo.WiFiSSID,
+			WiFiSignalDBM:   networkInfo.WiFiSignalDBM,
+			NetworkSpeedMbps: networkInfo.NetworkSpeedMbps,
+			IPAddresses:     networkInfo.IPAddresses,
+			WiFiIP:          networkInfo.WiFiIP,
+			GatewayIP:       networkInfo.GatewayIP,
+		},
+	}
+
+	// Hanya sertakan location jika valid
+	if location != nil {
+		payload.Location = &client.LocationData{
+			Latitude:       location.Latitude,
+			Longitude:      location.Longitude,
+			AccuracyMeters: location.AccuracyMeters,
+			Source:         location.Source,
+			City:           location.City,
+			Country:        location.Country,
+			Timestamp:      location.Timestamp,
+		}
 	} else {
-		log.Printf("heartbeat sent (CPU: %.1f%%, RAM: %.1f%%, Disk: %.1f%%)",
-			metrics.CPUPercent, metrics.RAMPercent, metrics.StoragePercent)
-	}
-}
-
-// -------- auto-update --------
-
-func checkAndUpdate(agentID string) {
-	osName := "linux"
-	if runtime.GOOS == "windows" {
-		osName = "windows"
+		// Jangan kirim lokasi sama sekali jika tidak valid
+		payload.Location = nil
 	}
 
-	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s",
-		*serverURL, agentID, *apiKey, osName)
-
-	resp, err := http.Get(url)
+	// Send heartbeat
+	resp, err := apiClient.Heartbeat(&payload)
 	if err != nil {
-		log.Printf("update check error: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+		log.Printf("❌ Heartbeat failed: %v", err)
 		return
 	}
 
-	var update UpdateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&update); err != nil {
-		log.Printf("update parse error: %v", err)
-		return
-	}
+	log.Printf("✅ Heartbeat sent (CPU: %.1f%%, RAM: %.1f%%, Disk: %s, Net: %s)",
+		cpuPercent, ramPercent, diskHealth, diag.Status)
 
-	if update.Version == "" || update.DownloadURL == "" {
-		return // No updates available
-	}
-
-	// Compare versions
-	if !isNewerVersion(update.Version, agentVersion) {
-		return
-	}
-
-	log.Printf("NEW VERSION AVAILABLE: v%s → v%s", agentVersion, update.Version)
-	log.Printf("Downloading from: %s", update.DownloadURL)
-
-	if err := downloadAndApply(update.DownloadURL); err != nil {
-		log.Printf("update failed: %v", err)
-	}
-}
-
-func isNewerVersion(newVer, currentVer string) bool {
-	newParts := parseVersion(newVer)
-	curParts := parseVersion(currentVer)
-
-	for i := 0; i < 3; i++ {
-		if newParts[i] > curParts[i] {
-			return true
-		}
-		if newParts[i] < curParts[i] {
-			return false
-		}
-	}
-	return false
-}
-
-func parseVersion(v string) [3]int {
-	parts := [3]int{0, 0, 0}
-	fmt.Sscanf(v, "%d.%d.%d", &parts[0], &parts[1], &parts[2])
-	return parts
-}
-
-func downloadAndApply(downloadURL string) error {
-	// Get current executable path
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("get exe path: %v", err)
-	}
-
-	// Determine new file extension
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
-	}
-
-	// Download to temp file
-	tmpFile := exePath + ".new" + ext
-	resp, err := http.Get(downloadURL)
-	if err != nil {
-		return fmt.Errorf("download: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned %d", resp.StatusCode)
-	}
-
-	out, err := os.Create(tmpFile)
-	if err != nil {
-		return fmt.Errorf("create temp file: %v", err)
-	}
-	defer out.Close()
-
-	written, err := io.Copy(out, resp.Body)
-	if err != nil {
-		os.Remove(tmpFile)
-		return fmt.Errorf("write file: %v", err)
-	}
-	log.Printf("Downloaded %d bytes to %s", written, tmpFile)
-
-	if runtime.GOOS == "windows" {
-		// On Windows, create a batch script that:
-		// 1. Waits for the agent to exit
-		// 2. Replaces the old exe with the new one
-		// 3. Restarts the agent
-		batPath := exePath + ".update.bat"
-		batContent := fmt.Sprintf(
-			`@echo off
-timeout /t 2 /nobreak > nul
-move /Y "%s" "%s"
-if %%ERRORLEVEL%% EQU 0 (
-    echo Update complete, restarting...
-    start "" "%s" --server %s --apikey %s --hostname %s --interval %d
-) else (
-    echo Update failed - could not replace file
-    pause
-)
-del "%%~f0"
-`,
-			tmpFile, exePath, exePath, *serverURL, *apiKey, *hostname, *interval,
-		)
-		if err := os.WriteFile(batPath, []byte(batContent), 0644); err != nil {
-			return fmt.Errorf("create batch: %v", err)
-		}
-
-		log.Printf("Starting update: %s", batPath)
-		cmd := exec.Command("cmd", "/C", batPath)
-		cmd.Start()
-
-		// Exit so the batch can replace us
-		os.Exit(0)
-	} else {
-		// Linux: rename over the running binary and restart
-		os.Chmod(tmpFile, 0755)
-		if err := os.Rename(tmpFile, exePath); err != nil {
-			return fmt.Errorf("replace binary: %v", err)
-		}
-		log.Printf("Binary replaced, restarting...")
-		cmd := exec.Command(exePath, os.Args[1:]...)
-		cmd.Start()
-		os.Exit(0)
-	}
-
-	return nil
-}
-
-// -------- remote command execution --------
-
-func processCommands(agentID string) {
-	cmds, err := fetchCommands(agentID)
-	if err != nil {
-		log.Printf("fetch commands error: %v", err)
-		return
-	}
-	if len(cmds) == 0 {
-		return
-	}
-	log.Printf("got %d pending command(s)", len(cmds))
-
-	for _, cmd := range cmds {
-		markCommand(cmd.ID, agentID, "start", "", "", 0)
-
-		start := time.Now()
-		output, execErr := runShellCommand(cmd.Command)
-		elapsed := time.Since(start)
-
-		log.Printf("command #%d finished in %v", cmd.ID, elapsed)
-
-		if execErr != nil {
-			markCommand(cmd.ID, agentID, "fail", "", execErr.Error(), 1)
-		} else {
-			markCommand(cmd.ID, agentID, "complete", output, "", 0)
+	if resp != nil {
+		// Check for auto-update
+		if resp.UpdateAvailable && resp.UpdateVersion != "" {
+			log.Printf("🔄 Update available: %s", resp.UpdateVersion)
+			go apiClient.DownloadAndApplyUpdate(resp.UpdateVersion, resp.UpdateURL)
 		}
 	}
 }
 
-func fetchCommands(agentID string) ([]PendingCommand, error) {
-	url := fmt.Sprintf("%s/api/agent/commands?agent_id=%s&api_key=%s",
-		*serverURL, agentID, *apiKey)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("fetch commands failed %d: %s", resp.StatusCode, string(body))
-	}
-	var cr CommandsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return nil, err
-	}
-	return cr.Commands, nil
+// Export fungsi untuk digunakan oleh collector
+func GetVersion() string {
+	return version
 }
 
-func markCommand(cmdID int, agentID, action, output, errStr string, exitCode int) {
-	body := map[string]interface{}{
-		"agent_id":  agentID,
-		"api_key":   *apiKey,
-		"action":    action,
-		"output":    output,
-		"error":     errStr,
-		"exit_code": exitCode,
-	}
-	jsonBody, _ := json.Marshal(body)
-	url := fmt.Sprintf("%s/api/agent/commands/%d", *serverURL, cmdID)
-	http.Post(url, "application/json", bytes.NewReader(jsonBody))
+func GetStartTime() time.Time {
+	return startTime
 }
 
-func runShellCommand(cmdStr string) (string, error) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr)
-	}
-	output, err := cmd.CombinedOutput()
-	return string(output), err
-}
-
-// -------- agent ID persistence --------
-
-func idFilePath() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "pulse-agent.id"
-	}
-	return filepath.Join(filepath.Dir(exe), "pulse-agent.id")
-}
-
-func loadAgentID() string {
-	data, err := os.ReadFile(idFilePath())
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
-}
-
-func saveAgentID(id string) error {
-	return os.WriteFile(idFilePath(), []byte(id), 0644)
+// Helper untuk JSON unmarshaling (digunakan di collector)
+func jsonUnmarshal(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
 }

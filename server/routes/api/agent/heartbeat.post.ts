@@ -11,6 +11,19 @@ interface HeartbeatBody {
   network_info?: any;
 }
 
+function isValidLatitude(lat: number): boolean {
+  return typeof lat === "number" && !isNaN(lat) && lat >= -90 && lat <= 90 && lat !== 0;
+}
+
+function isValidLongitude(lng: number): boolean {
+  return typeof lng === "number" && !isNaN(lng) && lng >= -180 && lng <= 180 && lng !== 0;
+}
+
+function isValidLocation(loc: any): boolean {
+  if (!loc) return false;
+  return isValidLatitude(loc.latitude) && isValidLongitude(loc.longitude);
+}
+
 export default defineHandler(async (event) => {
   const body = await readBody<HeartbeatBody>(event);
   if (!body?.agent_id || !body?.api_key) {
@@ -27,8 +40,7 @@ export default defineHandler(async (event) => {
     const n = body.network_info || {};
     const l = body.location || {};
 
-    // 1. Sanitize Metrics object to ensure no 'undefined' or 'null' for strict DB columns
-    // Defaulting to 0 for numeric values to avoid "cannot be null" errors
+    // 1. Sanitize Metrics object
     const safeMetrics = {
       cpu_percent: m.cpu_percent ?? 0,
       ram_percent: m.ram_percent ?? 0,
@@ -40,15 +52,14 @@ export default defineHandler(async (event) => {
       uptime_seconds: m.uptime_seconds ?? 0,
       network_status: m.network_status || "unknown",
       network_latency_ms: m.network_latency_ms ?? 0,
-      ping_latency_ms: m.ping_latency_ms ?? 0, // Force 0 instead of null
-      error_count: m.error_count ?? 0, // Force 0 instead of null
-      // Booleans
+      ping_latency_ms: m.ping_latency_ms ?? 0,
+      error_count: m.error_count ?? 0,
       gateway_reachable: m.gateway_reachable != null ? !!m.gateway_reachable : null,
       dns_working: m.dns_working != null ? !!m.dns_working : null,
       internet_reachable: m.internet_reachable != null ? !!m.internet_reachable : null,
       default_gateway: m.default_gateway || null,
       disk_health_status: m.disk_health_status || "unknown",
-      disk_temperature_c: m.disk_temperature_c != null ? Number(m.disk_temperature_c) : 0, // Force 0 instead of null
+      disk_temperature_c: m.disk_temperature_c != null ? Number(m.disk_temperature_c) : 0,
       timestamp: m.timestamp || new Date().toISOString(),
     };
 
@@ -59,11 +70,12 @@ export default defineHandler(async (event) => {
       }
     }
 
-    // 2. Sanitize Location object
-    if (body.location) {
+    // 2. Hanya simpan lokasi jika koordinat valid
+    const validLocation = isValidLocation(l);
+    if (validLocation) {
       const safeLocation = {
-        latitude: l.latitude ?? 0,
-        longitude: l.longitude ?? 0,
+        latitude: Number(l.latitude),
+        longitude: Number(l.longitude),
         accuracy_meters: l.accuracy_meters ?? 0,
         source: l.source || "unknown",
         timestamp: l.timestamp || new Date().toISOString(),
@@ -71,7 +83,7 @@ export default defineHandler(async (event) => {
       await insertLocation(body.agent_id, safeLocation);
     }
 
-    // 3. Update Asset Info (Sanitized)
+    // 3. Update Asset Info
     const asset = await queryOne<{ id: string }>(
       `SELECT id FROM assets WHERE agent_id = ?`, [body.agent_id],
     );
@@ -79,7 +91,6 @@ export default defineHandler(async (event) => {
     if (asset) {
       const status = determineStatus(safeMetrics);
       
-      // Extract network info safely
       const wifiSsid = n.wifi_ssid || null;
       const wifiSignal = n.wifi_signal_dbm != null ? n.wifi_signal_dbm : null;
       const wifiIp = n.wifi_ip || null;
@@ -87,37 +98,59 @@ export default defineHandler(async (event) => {
       const netSpeed = n.network_speed_mbps != null ? n.network_speed_mbps : null;
       const ipAddr = n.ip_addresses ? JSON.stringify(n.ip_addresses) : null;
 
+      // Update query dasar
+      const updateFields: string[] = [
+        "status=?", "last_seen_at=NOW()",
+      ];
+      const updateValues: any[] = [status];
+
+      // Hanya update lokasi jika koordinat valid
+      if (validLocation) {
+        updateFields.push(
+          "last_location_lat=?",
+          "last_location_lng=?",
+          "accuracy_meters=COALESCE(?, accuracy_meters)",
+          "location_source=COALESCE(NULLIF(?,''), location_source)",
+          "city=COALESCE(NULLIF(?, ''), city)",
+          "country=COALESCE(NULLIF(?, ''), country)",
+        );
+        updateValues.push(
+          Number(l.latitude),
+          Number(l.longitude),
+          l.accuracy_meters ?? 0,
+          l.source || null,
+          l.city || null,
+          l.country || null,
+        );
+      }
+
+      updateFields.push(
+        "disk_health_status=COALESCE(?, disk_health_status)",
+        "disk_temperature_c=COALESCE(?, disk_temperature_c)",
+        "wifi_ssid=COALESCE(NULLIF(?, ''), wifi_ssid)",
+        "wifi_signal_dbm=COALESCE(?, wifi_signal_dbm)",
+        "wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip)",
+        "gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip)",
+        "network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0))",
+        "ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))",
+        "error_count=COALESCE(?, COALESCE(error_count, 0))",
+        "ip_addresses=COALESCE(?, ip_addresses)",
+      );
+      updateValues.push(
+        safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
+        wifiSsid, wifiSignal,
+        wifiIp, gatewayIp,
+        netSpeed,
+        m.ping_latency_ms ?? 0,
+        m.error_count ?? 0,
+        ipAddr,
+      );
+
+      updateValues.push(body.agent_id);
+
       await query(
-        `UPDATE assets SET
-          status=?, last_seen_at=NOW(),
-          last_location_lat=COALESCE(?, last_location_lat),
-          last_location_lng=COALESCE(?, last_location_lng),
-          city=COALESCE(NULLIF(?, ''), city),
-          country=COALESCE(NULLIF(?, ''), country),
-          disk_health_status=COALESCE(?, disk_health_status),
-          disk_temperature_c=COALESCE(?, disk_temperature_c),
-          wifi_ssid=COALESCE(NULLIF(?, ''), wifi_ssid),
-          wifi_signal_dbm=COALESCE(?, wifi_signal_dbm),
-          wifi_ip=COALESCE(NULLIF(?, ''), wifi_ip),
-          gateway_ip=COALESCE(NULLIF(?, ''), gateway_ip),
-          network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0)),
-          ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0)),
-          error_count=COALESCE(?, COALESCE(error_count, 0)),
-          ip_addresses=COALESCE(?, ip_addresses)
-         WHERE agent_id=?`,
-        [
-          status,
-          l.latitude ?? 0, l.longitude ?? 0, // Use l.latitude directly
-          l.city || null, l.country || null,
-          safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
-          wifiSsid, wifiSignal,
-          wifiIp, gatewayIp,
-          netSpeed,
-          m.ping_latency_ms ?? 0, // Ensure 0
-          m.error_count ?? 0, // Ensure 0
-          ipAddr,
-          body.agent_id,
-        ],
+        `UPDATE assets SET ${updateFields.join(", ")} WHERE agent_id=?`,
+        updateValues,
       );
     }
   } catch (err: unknown) {
