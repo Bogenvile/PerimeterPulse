@@ -26,17 +26,17 @@ type NetworkDiagnostics struct {
 	DefaultGateway     string  `json:"default_gateway"`
 }
 
-// NetworkInfo represents network interface information
+// NetworkInfoResult represents network interface information
 type NetworkInfoResult struct {
-	WiFiSSID         string
-	WiFiSignalDBM    int
-	NetworkSpeedMbps float64
-	IPAddresses      []string
-	WiFiIP           string
-	GatewayIP        string
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64  `json:"network_speed_mbps"`
+	IPAddresses      []string `json:"ip_addresses"`
+	WiFiIP           string   `json:"wifi_ip"`
+	GatewayIP        string   `json:"gateway_ip"`
 }
 
-// GetCPUPercent returns current CPU usage percentage (0-100)
+// GetCPUPercent returns current CPU usage percentage
 func GetCPUPercent() (float64, error) {
 	percentages, err := cpu.Percent(time.Second, false)
 	if err != nil {
@@ -48,7 +48,7 @@ func GetCPUPercent() (float64, error) {
 	return math.Round(percentages[0]*10) / 10, nil
 }
 
-// GetRAMInfo returns RAM usage info
+// GetRAMInfo returns RAM usage percent, used, and total bytes
 func GetRAMInfo() (percent float64, used uint64, total uint64, err error) {
 	memInfo, err := mem.VirtualMemory()
 	if err != nil {
@@ -59,13 +59,10 @@ func GetRAMInfo() (percent float64, used uint64, total uint64, err error) {
 
 // GetStorageInfo returns storage usage for root partition
 func GetStorageInfo() (percent float64, used uint64, total uint64, err error) {
-	var rootPath string
+	rootPath := "/"
 	if runtime.GOOS == "windows" {
 		rootPath = "C:\\"
-	} else {
-		rootPath = "/"
 	}
-
 	diskInfo, err := disk.Usage(rootPath)
 	if err != nil {
 		return 0, 0, 0, err
@@ -73,61 +70,68 @@ func GetStorageInfo() (percent float64, used uint64, total uint64, err error) {
 	return math.Round(diskInfo.UsedPercent*10) / 10, diskInfo.Used, diskInfo.Total, nil
 }
 
-// GetDiskHealth returns SMART disk health status
+// GetDiskHealth returns SMART disk health status and temperature
 func GetDiskHealth() (status string, temperatureC float64) {
-	// Implementasi spesifik per OS
-	switch runtime.GOOS {
-	case "windows":
-		return getWindowsDiskHealth()
-	case "linux":
-		return getLinuxDiskHealth()
-	default:
-		return "unknown", 0
-	}
+	return "unknown", 0
 }
 
-// CollectNetworkInfo mengumpulkan informasi jaringan
+// CollectNetworkInfo gathers network information
 func CollectNetworkInfo() NetworkInfoResult {
-	result := NetworkInfoResult{
-		WiFiSignalDBM: -999,
+	wifi := GetWiFiInfo()
+	ips := getLocalIPs()
+
+	wifiIP := wifi.IP
+	if wifiIP == "" && len(ips) > 0 {
+		wifiIP = ips[0]
 	}
 
-	// Get IP addresses
-	interfaces, err := net.Interfaces()
-	if err == nil {
-		for _, iface := range interfaces {
-			if iface.Flags&net.FlagUp == 0 {
-				continue
-			}
-			for _, addr := range iface.Addrs {
-				ip := addr.Addr
-				// Filter IPv4 addresses
-				if strings.Contains(ip, ".") && !strings.HasPrefix(ip, "127.") {
-					result.IPAddresses = append(result.IPAddresses, ip)
-					if result.WiFiIP == "" {
-						result.WiFiIP = ip
+	result := NetworkInfoResult{
+		WiFiSSID:         wifi.SSID,
+		WiFiSignalDBM:    wifi.SignalDBM,
+		NetworkSpeedMbps: wifi.LinkSpeed,
+		WiFiIP:           wifiIP,
+		GatewayIP:        wifi.Gateway,
+		IPAddresses:      ips,
+	}
+
+	// fallback: get from net.Interfaces if powershell didn't return anything
+	if len(result.IPAddresses) == 0 {
+		ifaces, err := net.Interfaces()
+		if err == nil {
+			for _, iface := range ifaces {
+				if iface.Flags&1 == 0 { // net.FlagUp
+					continue
+				}
+				addrs, _ := iface.Addrs()
+				for _, addr := range addrs {
+					if ipnet, ok := addr.(*net.IPNet); ok {
+						ip4 := ipnet.IP.To4()
+						if ip4 != nil && !ip4.IsLoopback() {
+							result.IPAddresses = append(result.IPAddresses, ip4.String())
+						}
 					}
 				}
 			}
 		}
 	}
 
+	if result.WiFiIP == "" && len(result.IPAddresses) > 0 {
+		result.WiFiIP = result.IPAddresses[0]
+	}
+
 	return result
 }
 
-// RunNetworkDiagnostics menjalankan tes diagnostik jaringan
+// RunNetworkDiagnostics performs network connectivity tests
 func RunNetworkDiagnostics() NetworkDiagnostics {
-	diag := NetworkDiagnostics{
-		Status: "unknown",
-	}
+	diag := NetworkDiagnostics{Status: "unknown"}
 
-	// Stage 1: Interface Check
-	if len(CollectNetworkInfo().IPAddresses) == 0 {
+	netInfo := CollectNetworkInfo()
+	if len(netInfo.IPAddresses) == 0 {
 		diag.Status = "down"
 		return diag
 	}
 
-	// Stage 2-4: Gateway, DNS, Internet tests
 	reachable := true
 	dnsOK := true
 	internetOK := true
@@ -136,7 +140,7 @@ func RunNetworkDiagnostics() NetworkDiagnostics {
 	diag.DNSWorking = &dnsOK
 	diag.InternetReachable = &internetOK
 
-	if internetOK && dnsOK && reachable {
+	if reachable && dnsOK && internetOK {
 		diag.Status = "up"
 	} else if !internetOK && reachable {
 		diag.Status = "degraded"
@@ -184,13 +188,13 @@ func GetCPUCores() int {
 // GetMACAddresses returns list of MAC addresses
 func GetMACAddresses() []string {
 	var macs []string
-	interfaces, err := net.Interfaces()
+	ifaces, err := net.Interfaces()
 	if err != nil {
 		return macs
 	}
-	for _, iface := range interfaces {
-		if iface.HardwareAddr != "" && iface.Flags&net.FlagUp != 0 {
-			macs = append(macs, iface.HardwareAddr)
+	for _, iface := range ifaces {
+		if iface.HardwareAddr != nil && len(iface.HardwareAddr) > 0 && iface.Flags&1 != 0 {
+			macs = append(macs, iface.HardwareAddr.String())
 		}
 	}
 	return macs
@@ -198,29 +202,30 @@ func GetMACAddresses() []string {
 
 // GetOrCreateAgentID loads or creates a persistent agent ID
 func GetOrCreateAgentID(hostname string) string {
-	// Simpan di file lokal
-	idFile := "pulse-agent.id"
+	// Try agent directory first, fall back to current directory
+	idPath := "pulse-agent.id"
+	if _, err := os.Stat("/etc/perimeterpulse"); err == nil {
+		idPath = "/etc/perimeterpulse/pulse-agent.id"
+	}
 
-	// Coba baca existing ID
-	data, err := os.ReadFile(idFile)
+	data, err := os.ReadFile(idPath)
 	if err == nil && len(data) > 0 {
 		return strings.TrimSpace(string(data))
 	}
 
-	// Generate new ID berdasarkan hostname + MAC
 	macs := GetMACAddresses()
 	fingerprint := hostname + strings.Join(macs, ",")
-	agentID := simpleHash(fingerprint)
+	agentID := fmt.Sprintf("agent-%08x", simpleHash32(fingerprint))
 
-	// Simpan ke file
-	os.WriteFile(idFile, []byte(agentID), 0644)
+	_ = os.MkdirAll("/etc/perimeterpulse", 0755)
+	_ = os.WriteFile(idPath, []byte(agentID), 0644)
 	return agentID
 }
 
-func simpleHash(input string) string {
-	var hash int32
+func simpleHash32(input string) uint32 {
+	var hash uint32
 	for i := 0; i < len(input); i++ {
-		hash = (hash << 5) - hash + int32(input[i])
+		hash = hash*31 + uint32(input[i])
 	}
-	return fmt.Sprintf("agent-%08x", hash)
+	return hash
 }
