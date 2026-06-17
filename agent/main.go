@@ -1,3 +1,4 @@
+heartbeat setiap interval">
 package main
 
 import (
@@ -9,71 +10,84 @@ import (
 	"syscall"
 	"time"
 
+	"perimeterpulse-agent/buffer"
 	"perimeterpulse-agent/client"
 	"perimeterpulse-agent/collector"
 )
 
-const version = "1.0.0"
-
 func main() {
-	serverURL := flag.String("server", "", "PerimeterPulse server URL (required)")
-	apiKey := flag.String("apikey", "", "API key for agent authentication (required)")
-	hostnameOverride := flag.String("hostname", "", "Override auto-detected hostname")
-	interval := flag.Int("interval", 3, "Heartbeat interval in seconds")
-
+	serverURL := flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
+	apiKey := flag.String("apikey", "", "Agent API key")
 	flag.Parse()
 
-	if *serverURL == "" || *apiKey == "" {
-		fmt.Println("Usage: pulse-agent --server <url> --apikey <key> [--hostname <name>] [--interval <seconds>]")
-		os.Exit(1)
+	if *apiKey == "" {
+		log.Fatal("--apikey is required")
 	}
 
-	log.Printf("PerimeterPulse Agent v%s starting...\n", version)
-
-	// Collect system info
+	// ── Kumpulkan info awal ──
 	sysInfo := collector.CollectSystemInfo()
-	if *hostnameOverride != "" {
-		sysInfo.Hostname = *hostnameOverride
+	osName, osVer := collector.GetOSInfo()
+	_ = osName
+	_ = osVer
+
+	agentID := collector.GenerateAgentID(sysInfo.Hostname, sysInfo.MacAddresses)
+	if agentID == "" {
+		agentID = fmt.Sprintf("agent-%x", time.Now().UnixMilli())
 	}
 
-	osInfo := collector.GetOSInfo()
-	agentID := collector.GenerateAgentID(sysInfo.Hostname, sysInfo.MACAddresses)
+	log.Printf("[main] Agent ID: %s | Hostname: %s | OS: %s %s",
+		agentID, sysInfo.Hostname, osName, osVer)
 
-	log.Printf("Agent ID: %s | Hostname: %s | OS: %s %s\n",
-		agentID, sysInfo.Hostname, osInfo.OS, osInfo.OSVersion)
-
-	apiClient := client.NewClient(*serverURL, *apiKey, agentID)
-
-	log.Println("Registering agent with server...")
-	if err := apiClient.Register(sysInfo, osInfo, version); err != nil {
-		log.Printf("Warning: Registration failed: %v (will retry on first heartbeat)\n", err)
+	// ── Client ──
+	apiClient := client.NewClient(*serverURL, *apiKey)
+	offlineBuf, err := buffer.NewFileBuffer("pulse-buffer.jsonl")
+	if err != nil {
+		log.Printf("[main] Buffer warn: %v", err)
 	}
 
-	intervalDuration := time.Duration(*interval) * time.Second
-	log.Printf("Heartbeat interval: %s. Agent running.\n", intervalDuration)
-
+	// ── Graceful shutdown ──
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
-	ticker := time.NewTicker(intervalDuration)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
+	// ── Loop ──
 	for {
-		select {
-		case <-ticker.C:
-			metrics := collector.CollectMetrics()
-			network := collector.CollectNetworkInfo()
-			location := collector.CollectLocation()
+		metrics := collector.CollectMetrics(sysInfo.DiskType)
+		netInfo := collector.CollectNetworkInfo()
+		location := collector.CollectLocation()
 
-			if err := apiClient.SendHeartbeat(metrics, network, location); err != nil {
-				log.Printf("Heartbeat failed: %v\n", err)
-			} else {
-				log.Println("Heartbeat sent successfully")
+		log.Printf("[main] Sending heartbeat for %s", agentID)
+
+		err := apiClient.SendHeartbeat(agentID, metrics, netInfo, location)
+		if err != nil {
+			log.Printf("[main] Heartbeat error: %v", err)
+			if offlineBuf != nil {
+				_ = offlineBuf.Append(map[string]interface{}{
+					"agent_id": agentID,
+					"time":     time.Now().UTC().Format(time.RFC3339),
+					"error":    err.Error(),
+				})
 			}
+		} else {
+			log.Printf("[main] Heartbeat OK")
+			// Flush offline buffer setelah sukses
+			if offlineBuf != nil {
+				entries, _ := offlineBuf.ReadAll()
+				for _, e := range entries {
+					log.Printf("[main] Flushing buffered: %s", string(e))
+				}
+				_ = offlineBuf.Clear()
+			}
+		}
 
+		select {
 		case <-sigCh:
-			log.Println("Shutting down...")
+			log.Println("[main] Shutting down...")
 			return
+		case <-ticker.C:
+			continue
 		}
 	}
 }
