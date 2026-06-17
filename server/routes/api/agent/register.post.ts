@@ -13,13 +13,17 @@ interface RegisterBody {
   wifi_ssid?: string; wifi_signal_dbm?: number; network_speed_mbps?: number;
 }
 
-/** Check if a hostname looks like an auto-generated placeholder */
+/**
+ * Check if a hostname looks like an auto-generated placeholder.
+ * We only flag names that WE generate (Host-xxxx) or obvious garbage.
+ * Real Windows hostnames like PC-xxxx, DESKTOP-xxxx, LAPTOP-xxxx are NOT placeholders.
+ */
 function isPlaceholderHostname(hn: string): boolean {
   if (!hn) return true;
   const trimmed = hn.trim();
   if (!trimmed) return true;
+  // Only "Host-" prefix is our own auto-generated fallback
   if (/^Host-[a-f0-9]{6,12}$/i.test(trimmed)) return true;
-  if (/^(Unknown|Agent|PC)-[a-f0-9-]+$/i.test(trimmed)) return true;
   return false;
 }
 

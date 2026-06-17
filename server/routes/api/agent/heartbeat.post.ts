@@ -26,15 +26,16 @@ function isValidLocation(loc: any): boolean {
   return isValidLatitude(loc.latitude) && isValidLongitude(loc.longitude);
 }
 
-/** Check if a hostname looks like an auto-generated placeholder */
+/**
+ * Check if a hostname looks like an auto-generated placeholder.
+ * Only our own "Host-xxxx" pattern is treated as placeholder.
+ * Real Windows hostnames like PC-xxxx, DESKTOP-xxxx, LAPTOP-xxxx are NOT placeholders.
+ */
 function isPlaceholderHostname(hn: string): boolean {
   if (!hn) return true;
   const trimmed = hn.trim();
   if (!trimmed) return true;
-  // Matches "Host-abc12345" pattern
   if (/^Host-[a-f0-9]{6,12}$/i.test(trimmed)) return true;
-  // Matches "Unknown-..." or generic placeholders
-  if (/^(Unknown|Agent|PC)-[a-f0-9-]+$/i.test(trimmed)) return true;
   return false;
 }
 
@@ -142,7 +143,7 @@ export default defineHandler(async (event) => {
     if (!asset) {
       // Use real hostname if available, otherwise use a sensible fallback
       const agentSuffix = body.agent_id.replace(/^agent-/, "").slice(0, 8);
-      const hostname = realHostname || `PC-${agentSuffix}`;
+      const hostname = realHostname || `Host-${agentSuffix}`;
       const os = n.os || m.os || "unknown";
       const osVersion = n.os_version || m.os_version || "";
 
