@@ -26,6 +26,17 @@ function isValidLocation(loc: any): boolean {
   return isValidLatitude(loc.latitude) && isValidLongitude(loc.longitude);
 }
 
+/** Filter only IPv4 addresses (skip IPv6 and loopback) */
+function filterIPv4(addresses: string[]): string[] {
+  if (!addresses || !Array.isArray(addresses)) return [];
+  return addresses.filter((ip) => {
+    if (!ip || ip.includes(":")) return false; // Skip IPv6
+    if (ip.startsWith("127.")) return false;   // Skip loopback
+    if (ip.startsWith("0.")) return false;     // Skip invalid
+    return true;
+  });
+}
+
 /**
  * Check if a hostname looks like an auto-generated placeholder.
  * Only our own "Host-xxxx" pattern is treated as placeholder.
@@ -57,6 +68,9 @@ export default defineHandler(async (event) => {
     const n = body.network_info || {};
     const l = body.location || {};
 
+    // Accept ping_latency_ms from either metrics or network_info
+    const pingLatency = m.ping_latency_ms ?? n.ping_latency_ms ?? 0;
+
     const safeMetrics = {
       cpu_percent: m.cpu_percent ?? 0,
       ram_percent: m.ram_percent ?? 0,
@@ -68,7 +82,7 @@ export default defineHandler(async (event) => {
       uptime_seconds: m.uptime_seconds ?? 0,
       network_status: m.network_status || "unknown",
       network_latency_ms: m.network_latency_ms ?? 0,
-      ping_latency_ms: m.ping_latency_ms ?? 0,
+      ping_latency_ms: pingLatency,
       error_count: m.error_count ?? 0,
       gateway_reachable: m.gateway_reachable != null ? !!m.gateway_reachable : null,
       dns_working: m.dns_working != null ? !!m.dns_working : null,
@@ -149,8 +163,7 @@ export default defineHandler(async (event) => {
 
       console.log(`[heartbeat] Auto-creating asset: "${hostname}" (agent_id: ${body.agent_id})`);
 
-      const ipAddresses = n.ip_addresses ? JSON.stringify(n.ip_addresses) : "[]";
-      const macAddresses = n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]";
+      const ipAddresses = JSON.stringify(filterIPv4(n.ip_addresses || []));
 
       try {
         await query(
@@ -161,10 +174,10 @@ export default defineHandler(async (event) => {
              disk_model, disk_type, disk_health_status, disk_temperature_c,
              wifi_ssid, wifi_signal_dbm, network_speed_mbps,
              status, last_seen_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
           [
             body.agent_id, hostname, os, osVersion, "unknown",
-            macAddresses, ipAddresses,
+            n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]", ipAddresses,
             m.cpu_model || "Unknown", m.cpu_cores || 0,
             m.ram_total_bytes || 0, m.storage_total_bytes || 0,
             m.disk_model || "", m.disk_type || "unknown",
@@ -184,7 +197,8 @@ export default defineHandler(async (event) => {
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
           [
             body.agent_id, hostname, os, osVersion, "unknown",
-            macAddresses, ipAddresses, "Unknown", 0, 0, "unknown", "online",
+            n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]", ipAddresses,
+            "Unknown", 0, 0, "unknown", "online",
           ],
         );
       }
@@ -192,7 +206,7 @@ export default defineHandler(async (event) => {
       if (validLocation) {
         await updateLocation(body.agent_id, l);
       }
-      await updateNetwork(body.agent_id, n, m);
+      await updateNetwork(body.agent_id, n, m, pingLatency);
 
       return { ok: true, server_time: new Date().toISOString(), action: "auto_registered" };
     }
@@ -262,7 +276,7 @@ export default defineHandler(async (event) => {
       safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
       n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
       n.network_speed_mbps ?? null,
-      n.ip_addresses ? JSON.stringify(n.ip_addresses) : null,
+      JSON.stringify(filterIPv4(n.ip_addresses || [])),
     );
 
     if (await columnExists("assets", "wifi_ip")) {
@@ -275,7 +289,7 @@ export default defineHandler(async (event) => {
     }
     if (await columnExists("assets", "ping_latency_ms")) {
       updateFields.push("ping_latency_ms=COALESCE(?, COALESCE(ping_latency_ms, 0))");
-      updateValues.push(m.ping_latency_ms ?? 0);
+      updateValues.push(pingLatency);
     }
     if (await columnExists("assets", "error_count")) {
       updateFields.push("error_count=COALESCE(?, COALESCE(error_count, 0))");
@@ -333,14 +347,14 @@ async function updateLocation(agentId: string, l: any): Promise<void> {
   await query(`UPDATE assets SET ${locFields.join(", ")} WHERE agent_id=?`, locValues);
 }
 
-async function updateNetwork(agentId: string, n: any, m: any): Promise<void> {
+async function updateNetwork(agentId: string, n: any, m: any, pingLatency: number): Promise<void> {
   const fields: string[] = [];
   const values: any[] = [];
 
   if (n.wifi_ssid) { fields.push("wifi_ssid=?"); values.push(n.wifi_ssid); }
   if (n.wifi_signal_dbm != null) { fields.push("wifi_signal_dbm=?"); values.push(n.wifi_signal_dbm); }
   if (n.network_speed_mbps) { fields.push("network_speed_mbps=?"); values.push(n.network_speed_mbps); }
-  if (n.ip_addresses) { fields.push("ip_addresses=?"); values.push(JSON.stringify(n.ip_addresses)); }
+  if (n.ip_addresses) { fields.push("ip_addresses=?"); values.push(JSON.stringify(filterIPv4(n.ip_addresses))); }
 
   if (await columnExists("assets", "wifi_ip") && n.wifi_ip) {
     fields.push("wifi_ip=?"); values.push(n.wifi_ip);
@@ -349,7 +363,7 @@ async function updateNetwork(agentId: string, n: any, m: any): Promise<void> {
     fields.push("gateway_ip=?"); values.push(n.gateway_ip);
   }
   if (await columnExists("assets", "ping_latency_ms")) {
-    fields.push("ping_latency_ms=?"); values.push(m.ping_latency_ms ?? 0);
+    fields.push("ping_latency_ms=?"); values.push(pingLatency);
   }
   if (await columnExists("assets", "error_count")) {
     fields.push("error_count=?"); values.push(m.error_count ?? 0);
