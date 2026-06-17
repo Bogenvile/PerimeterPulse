@@ -30,22 +30,22 @@ func main() {
 
 	log.Printf("PerimeterPulse Agent v%s starting...\n", version)
 
-	// Collect system info
 	sysInfo := collector.CollectSystemInfo()
 	if *hostnameOverride != "" {
 		sysInfo.Hostname = *hostnameOverride
 	}
 
-	osInfo, _ := collector.GetOSInfo()
+	osName, osVersion := collector.GetOSInfo()
+
 	agentID := collector.GenerateAgentID(sysInfo.Hostname, sysInfo.MacAddresses)
 
 	log.Printf("Agent ID: %s | Hostname: %s | OS: %s %s\n",
-		agentID, sysInfo.Hostname, osInfo.OS, osInfo.OSVersion)
+		agentID, sysInfo.Hostname, osName, osVersion)
 
 	apiClient := client.NewClient(*serverURL, *apiKey)
 
 	log.Println("Registering agent with server...")
-	if err := client.Register(apiClient, sysInfo, osInfo, version); err != nil {
+	if err := client.Register(apiClient, sysInfo, osName, osVersion, version); err != nil {
 		log.Printf("Warning: Registration failed: %v (will retry on first heartbeat)\n", err)
 	}
 
