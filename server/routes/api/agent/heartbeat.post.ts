@@ -26,6 +26,18 @@ function isValidLocation(loc: any): boolean {
   return isValidLatitude(loc.latitude) && isValidLongitude(loc.longitude);
 }
 
+/** Check if a hostname looks like an auto-generated placeholder */
+function isPlaceholderHostname(hn: string): boolean {
+  if (!hn) return true;
+  const trimmed = hn.trim();
+  if (!trimmed) return true;
+  // Matches "Host-abc12345" pattern
+  if (/^Host-[a-f0-9]{6,12}$/i.test(trimmed)) return true;
+  // Matches "Unknown-..." or generic placeholders
+  if (/^(Unknown|Agent|PC)-[a-f0-9-]+$/i.test(trimmed)) return true;
+  return false;
+}
+
 export default defineHandler(async (event) => {
   await ensureV6Schema();
 
@@ -84,7 +96,7 @@ export default defineHandler(async (event) => {
       });
     }
 
-    // ── Step 1: Look up by agent_id (primary, like the original code) ──
+    // ── Step 1: Look up by agent_id ──
     let asset = await queryOne<{
       id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
     }>(
@@ -92,44 +104,45 @@ export default defineHandler(async (event) => {
       [body.agent_id],
     );
 
+    // Determine the "real" hostname from the payload (skip placeholders)
+    const payloadHostname = body.hostname?.trim();
+    const realHostname = (payloadHostname && !isPlaceholderHostname(payloadHostname))
+      ? payloadHostname
+      : null;
+
     // ── Step 2: If not found by agent_id, try matching by hostname ──
-    if (!asset && body.hostname) {
-      const hn = body.hostname.trim();
-      // Only use hostname lookup if it's NOT a placeholder
-      if (!hn.startsWith("Host-")) {
-        console.log(`[heartbeat] agent_id ${body.agent_id} not found, trying hostname: "${hn}"`);
+    if (!asset && realHostname) {
+      console.log(`[heartbeat] agent_id ${body.agent_id} not found, trying hostname: "${realHostname}"`);
 
-        const byHostname = await queryOne<{
-          id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
-        }>(
-          `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
-          [hn],
-        );
+      const byHostname = await queryOne<{
+        id: string; agent_id: string; status: string; hostname: string; last_status_change: string | null;
+      }>(
+        `SELECT id, agent_id, status, hostname, last_status_change FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
+        [realHostname],
+      );
 
-        if (byHostname) {
-          const oldAgentId = byHostname.agent_id;
-          console.log(`[heartbeat] Hostname match found: "${hn}" was ${oldAgentId}, now ${body.agent_id}`);
+      if (byHostname) {
+        const oldAgentId = byHostname.agent_id;
+        console.log(`[heartbeat] Hostname match found: "${realHostname}" was ${oldAgentId}, now ${body.agent_id}`);
 
-          // Update agent_id on existing asset
-          await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, byHostname.id]);
+        // Update agent_id on existing asset
+        await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, byHostname.id]);
 
-          // Reassign all time-series data
-          await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
-          await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
-          await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
-          try { await query(`UPDATE agent_commands SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]); } catch {}
+        // Reassign all time-series data
+        await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+        await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+        await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
+        try { await query(`UPDATE agent_commands SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]); } catch {}
 
-          asset = { ...byHostname, agent_id: body.agent_id };
-        }
+        asset = { ...byHostname, agent_id: body.agent_id };
       }
     }
 
     // ── Step 3: Still not found — create new asset ──
     if (!asset) {
+      // Use real hostname if available, otherwise use a sensible fallback
       const agentSuffix = body.agent_id.replace(/^agent-/, "").slice(0, 8);
-      const hostname = (body.hostname && body.hostname.trim() && !body.hostname.trim().startsWith("Host-"))
-        ? body.hostname.trim()
-        : `Host-${agentSuffix}`;
+      const hostname = realHostname || `PC-${agentSuffix}`;
       const os = n.os || m.os || "unknown";
       const osVersion = n.os_version || m.os_version || "";
 
@@ -190,19 +203,27 @@ export default defineHandler(async (event) => {
     const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
     const updateValues: any[] = [newStatus];
 
-    // Update hostname from payload if provided and different
-    if (body.hostname) {
-      const hn = body.hostname.trim();
-      // Only update hostname if it's not a placeholder AND different from current
-      if (hn && !hn.startsWith("Host-") && hn !== asset.hostname) {
+    // Update hostname ONLY if the payload has a real hostname AND the current one is a placeholder
+    // or if the real hostname differs from current (and current is not already a real name from another agent)
+    if (realHostname && realHostname !== asset.hostname) {
+      // Check if current hostname is a placeholder — always allow overwriting placeholders
+      const currentIsPlaceholder = isPlaceholderHostname(asset.hostname);
+
+      if (currentIsPlaceholder) {
+        // Current hostname is a placeholder (e.g. "Host-xxxxx") — fix it with the real name
+        console.log(`[heartbeat] Fixing placeholder hostname: "${asset.hostname}" → "${realHostname}"`);
+        updateFields.push("hostname=?");
+        updateValues.push(realHostname);
+      } else {
+        // Current hostname is a real name — only update if no conflict
         const conflict = await queryOne<{ id: string }>(
           `SELECT id FROM assets WHERE hostname = ? AND id != ?`,
-          [hn, asset.id],
+          [realHostname, asset.id],
         );
         if (!conflict) {
-          console.log(`[heartbeat] Updating hostname for ${body.agent_id}: "${asset.hostname}" → "${hn}"`);
+          console.log(`[heartbeat] Updating hostname for ${body.agent_id}: "${asset.hostname}" → "${realHostname}"`);
           updateFields.push("hostname=?");
-          updateValues.push(hn);
+          updateValues.push(realHostname);
         }
       }
     }

@@ -13,6 +13,16 @@ interface RegisterBody {
   wifi_ssid?: string; wifi_signal_dbm?: number; network_speed_mbps?: number;
 }
 
+/** Check if a hostname looks like an auto-generated placeholder */
+function isPlaceholderHostname(hn: string): boolean {
+  if (!hn) return true;
+  const trimmed = hn.trim();
+  if (!trimmed) return true;
+  if (/^Host-[a-f0-9]{6,12}$/i.test(trimmed)) return true;
+  if (/^(Unknown|Agent|PC)-[a-f0-9-]+$/i.test(trimmed)) return true;
+  return false;
+}
+
 export default defineHandler(async (event) => {
   try {
     const body = await readBody<RegisterBody>(event);
@@ -25,28 +35,37 @@ export default defineHandler(async (event) => {
       throw createError({ statusCode: 401, statusMessage: "Invalid API key" });
     }
 
-    const hostname = body.hostname.trim();
-    const agentId = body.agent_id?.trim() || simpleHash(hostname + (body.mac_addresses || []).join(","));
+    const rawHostname = body.hostname.trim();
+    const hostnameIsPlaceholder = isPlaceholderHostname(rawHostname);
+    const agentId = body.agent_id?.trim() || simpleHash(rawHostname + (body.mac_addresses || []).join(","));
     const macsJson = JSON.stringify(body.mac_addresses || []);
     const ipsJson = JSON.stringify(body.ip_addresses || []);
 
     // ── Primary lookup: by hostname ──
-    const existing = await queryOne<{ id: string; agent_id: string }>(
-      `SELECT id, agent_id FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
-      [hostname],
+    const existing = await queryOne<{ id: string; agent_id: string; hostname: string }>(
+      `SELECT id, agent_id, hostname FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
+      [rawHostname],
     );
 
     if (existing) {
-      // Asset exists with this hostname — update it, including the agent_id
-      console.log(`[register] Updating existing asset "${hostname}" (${existing.agent_id} → ${agentId})`);
+      // Asset found by hostname
+      const existingIsPlaceholder = isPlaceholderHostname(existing.hostname);
 
-      // Clean up any OTHER duplicates with same hostname (keep the one we're updating)
+      // If the new hostname is valid and the existing one is a placeholder, fix it
+      if (!hostnameIsPlaceholder && existingIsPlaceholder) {
+        console.log(`[register] Fixing placeholder hostname: "${existing.hostname}" → "${rawHostname}" (agent: ${agentId})`);
+        await query(`UPDATE assets SET hostname = ? WHERE id = ?`, [rawHostname, existing.id]);
+      }
+
+      // Update agent_id on the existing asset
+      console.log(`[register] Updating existing asset "${rawHostname}" (${existing.agent_id} → ${agentId})`);
+
+      // Clean up duplicates with same hostname
       const duplicates = await query<{ id: string; agent_id: string }>(
         `SELECT id, agent_id FROM assets WHERE hostname = ? AND id != ?`,
-        [hostname, existing.id],
+        [rawHostname, existing.id],
       );
       for (const dup of duplicates) {
-        // Reassign metrics/locations/errors to the surviving asset
         await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [agentId, dup.agent_id]);
         await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [agentId, dup.agent_id]);
         await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [agentId, dup.agent_id]);
@@ -56,8 +75,13 @@ export default defineHandler(async (event) => {
         await query(`DELETE FROM agent_error_logs WHERE agent_id = ?`, [dup.agent_id]);
         try { await query(`DELETE FROM agent_commands WHERE agent_id = ?`, [dup.agent_id]); } catch {}
         await query(`DELETE FROM assets WHERE id = ?`, [dup.id]);
-        console.log(`[register] Removed duplicate: ${dup.agent_id} (${hostname})`);
+        console.log(`[register] Removed duplicate: ${dup.agent_id} (${rawHostname})`);
       }
+
+      // Update asset info — but DON'T overwrite a real hostname with a placeholder
+      const finalHostname = (hostnameIsPlaceholder && !existingIsPlaceholder)
+        ? existing.hostname  // Keep the existing real hostname
+        : rawHostname;        // Use the new one (real or both placeholder)
 
       await query(
         `UPDATE assets SET
@@ -68,7 +92,7 @@ export default defineHandler(async (event) => {
           wifi_ssid=?, wifi_signal_dbm=?, network_speed_mbps=?
          WHERE id=?`,
         [
-          agentId, hostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
+          agentId, finalHostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
           macsJson, ipsJson, body.cpu_model || "", body.cpu_cores || 0,
           body.ram_total_bytes || 0, body.storage_total_bytes || 0,
           body.disk_model || "", body.disk_type || "unknown",
@@ -77,23 +101,62 @@ export default defineHandler(async (event) => {
         ],
       );
     } else {
-      // No asset with this hostname — create new
-      console.log(`[register] Creating new asset: "${hostname}" (${agentId})`);
-      await query(
-        `INSERT INTO assets
-          (agent_id, hostname, os, os_version, agent_version,
-           mac_addresses, ip_addresses, cpu_model, cpu_cores,
-           ram_total_bytes, storage_total_bytes,
-           disk_model, disk_type, wifi_ssid, wifi_signal_dbm, network_speed_mbps, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'offline')`,
-        [
-          agentId, hostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
-          macsJson, ipsJson, body.cpu_model || "", body.cpu_cores || 0,
-          body.ram_total_bytes || 0, body.storage_total_bytes || 0,
-          body.disk_model || "", body.disk_type || "unknown",
-          body.wifi_ssid || "", body.wifi_signal_dbm ?? null, body.network_speed_mbps || 0,
-        ],
+      // No asset with this hostname — check if agent_id already exists
+      const byAgentId = await queryOne<{ id: string; hostname: string }>(
+        `SELECT id, hostname FROM assets WHERE agent_id = ?`,
+        [agentId],
       );
+
+      if (byAgentId) {
+        // Agent ID already exists — update it, but keep existing hostname if the new one is a placeholder
+        const currentHostname = byAgentId.hostname;
+        const currentIsPlaceholder = isPlaceholderHostname(currentHostname);
+        const finalHostname = (hostnameIsPlaceholder && !currentIsPlaceholder)
+          ? currentHostname  // Keep existing real hostname
+          : rawHostname;      // Use the new one
+
+        console.log(`[register] Agent ${agentId} re-registering, updating hostname: "${currentHostname}" → "${finalHostname}"`);
+        await query(
+          `UPDATE assets SET
+            hostname=?, os=?, os_version=?, agent_version=?,
+            mac_addresses=?, ip_addresses=?, cpu_model=?, cpu_cores=?,
+            ram_total_bytes=?, storage_total_bytes=?,
+            disk_model=?, disk_type=?,
+            wifi_ssid=?, wifi_signal_dbm=?, network_speed_mbps=?
+           WHERE id=?`,
+          [
+            finalHostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
+            macsJson, ipsJson, body.cpu_model || "", body.cpu_cores || 0,
+            body.ram_total_bytes || 0, body.storage_total_bytes || 0,
+            body.disk_model || "", body.disk_type || "unknown",
+            body.wifi_ssid || "", body.wifi_signal_dbm ?? null, body.network_speed_mbps || 0,
+            byAgentId.id,
+          ],
+        );
+      } else {
+        // Brand new asset
+        // If hostname is a placeholder, use a slightly better fallback
+        const finalHostname = hostnameIsPlaceholder
+          ? `PC-${agentId.replace(/^agent-/, "").slice(0, 8)}`
+          : rawHostname;
+
+        console.log(`[register] Creating new asset: "${finalHostname}" (${agentId})`);
+        await query(
+          `INSERT INTO assets
+            (agent_id, hostname, os, os_version, agent_version,
+             mac_addresses, ip_addresses, cpu_model, cpu_cores,
+             ram_total_bytes, storage_total_bytes,
+             disk_model, disk_type, wifi_ssid, wifi_signal_dbm, network_speed_mbps, status)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'offline')`,
+          [
+            agentId, finalHostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
+            macsJson, ipsJson, body.cpu_model || "", body.cpu_cores || 0,
+            body.ram_total_bytes || 0, body.storage_total_bytes || 0,
+            body.disk_model || "", body.disk_type || "unknown",
+            body.wifi_ssid || "", body.wifi_signal_dbm ?? null, body.network_speed_mbps || 0,
+          ],
+        );
+      }
     }
 
     return { ok: true, agent_id: agentId };
