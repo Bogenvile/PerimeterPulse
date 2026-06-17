@@ -4,102 +4,62 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"time"
-
 	"perimeterpulse-agent/collector"
+	"time"
 )
 
-// Client handles communication with the PerimeterPulse server
 type Client struct {
-	serverURL string
-	apiKey    string
-	agentID   string
-	http      *http.Client
+	ServerURL string
+	APIKey    string
+	HTTP      *http.Client
 }
 
-// HeartbeatPayload contains data sent in a heartbeat
-type HeartbeatPayload struct {
-	AgentID     string                  `json:"agent_id"`
-	ApiKey      string                  `json:"api_key"`
-	Metrics     collector.MetricsData   `json:"metrics"`
-	NetworkInfo collector.NetworkInfo   `json:"network_info"`
-	Location    *collector.LocationData `json:"location,omitempty"`
-}
-
-// NewClient creates a new API client
-func NewClient(serverURL, apiKey, agentID string) *Client {
+func NewClient(serverURL, apiKey string) *Client {
 	return &Client{
-		serverURL: serverURL,
-		apiKey:    apiKey,
-		agentID:   agentID,
-		http: &http.Client{
-			Timeout: 15 * time.Second,
-		},
+		ServerURL: serverURL,
+		APIKey:    apiKey,
+		HTTP:      &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// Register sends registration data to the server
-func (c *Client) Register(info collector.SystemInfo, osInfo collector.OSInfo, version string) error {
-	payload := collector.RegistrationPayload{
-		ApiKey:            c.apiKey,
-		AgentID:           c.agentID,
-		Hostname:          info.Hostname,
-		OS:                osInfo.OS,
-		OSVersion:         osInfo.OSVersion,
-		AgentVersion:      version,
-		MACAddresses:      info.MACAddresses,
-		IPAddresses:       info.IPAddresses,
-		CPUModel:          info.CPUModel,
-		CPUCores:          info.CPUCores,
-		RAMTotalBytes:     info.RAMTotalBytes,
-		StorageTotalBytes: info.StorageTotalBytes,
-		DiskModel:         info.DiskModel,
-		DiskType:          info.DiskType,
-		WiFiSSID:          info.WiFiSSID,
-		WiFiSignalDBM:     info.WiFiSignalDBM,
-		NetworkSpeedMbps:  info.NetworkSpeedMbps,
-	}
-	return c.post("/api/agent/register", payload)
+type HeartbeatPayload struct {
+	AgentID  string                 `json:"agent_id"`
+	APIKey   string                 `json:"api_key"`
+	Metrics  collector.Metrics      `json:"metrics"`
+	Network  collector.NetworkInfo  `json:"network_info"`
+	Location collector.LocationData `json:"location"`
 }
 
-// SendHeartbeat sends a heartbeat to the server
-func (c *Client) SendHeartbeat(m collector.MetricsData, n collector.NetworkInfo, loc *collector.LocationData) error {
+func (c *Client) SendHeartbeat(agentID string, metrics collector.Metrics, netInfo collector.NetworkInfo, location collector.LocationData) error {
 	payload := HeartbeatPayload{
-		AgentID:     c.agentID,
-		ApiKey:      c.apiKey,
-		Metrics:     m,
-		NetworkInfo: n,
-		Location:    loc,
+		AgentID:  agentID,
+		APIKey:   c.APIKey,
+		Metrics:  metrics,
+		Network:  netInfo,
+		Location: location,
 	}
-	return c.post("/api/agent/heartbeat", payload)
-}
-
-func (c *Client) post(path string, payload interface{}) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	url := c.serverURL + path
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.ServerURL+"/api/agent/heartbeat", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return err
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("http request: %w", err)
+		return fmt.Errorf("heartbeat request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct{ Message string }
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("server error %d: %s", resp.StatusCode, errResp.Message)
 	}
-
 	return nil
 }

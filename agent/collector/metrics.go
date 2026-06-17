@@ -1,34 +1,27 @@
 package collector
 
-import "time"
-
-func collectMetrics() MetricsData {
-	return MetricsData{
-		CPUPercent:       0,
-		RAMPercent:       0,
-		RAMUsedBytes:     0,
-		RAMTotalBytes:    0,
-		StoragePercent:   0,
-		StorageUsedBytes: 0,
-		StorageTotalBytes: 0,
-		UptimeSeconds:    0,
-		NetworkStatus:    "unknown",
-		NetworkLatencyMS: 0,
-		DiskHealthStatus: "unknown",
-		DiskTemperatureC: 0,
-		Timestamp:        time.Now().UTC().Format(time.RFC3339),
-	}
+// Metrics holds system performance data
+type Metrics struct {
+	CPUPCT        float64 `json:"cpu_percent"`
+	RAMPCT        float64 `json:"ram_percent"`
+	RAMUsed       uint64  `json:"ram_used_bytes"`
+	RAMTotal      uint64  `json:"ram_total_bytes"`
+	StoragePCT    float64 `json:"storage_percent"`
+	StorageUsed   uint64  `json:"storage_used_bytes"`
+	StorageTotal  uint64  `json:"storage_total_bytes"`
+	UptimeSec     uint64  `json:"uptime_seconds"`
+	NetworkStatus string  `json:"network_status"`
+	NetLatencyMS  float64 `json:"network_latency_ms"`
+	DiskHealth    string  `json:"disk_health_status"`
+	DiskTempC     float64 `json:"disk_temperature_c"`
+	PingLatencyMS float64 `json:"ping_latency_ms"`
+	ErrorCount    int     `json:"error_count"`
+	Timestamp     string  `json:"timestamp"`
 }
 
-func collectNetworkInfo() NetworkInfo {
-	return NetworkInfo{
-		WiFiSSID:         "",
-		WiFiSignalDBM:    0,
-		NetworkSpeedMbps: 0,
-		IPAddresses:      []string{},
+func CollectMetrics(diskType string) Metrics {
+	return Metrics{
+		NetworkStatus: "unknown",
+		DiskHealth:    "ok",
 	}
-}
-
-func collectLocation() *LocationData {
-	return nil
 }

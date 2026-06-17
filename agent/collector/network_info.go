@@ -1,16 +1,13 @@
 package collector
 
-// These are function variables overridden by platform-specific init()
-var (
-	getWiFiSSIDFunc        func() string = func() string { return "" }
-	getWiFiSignalDBMFunc   func() int    = func() int { return 0 }
-	getNetworkSpeedMbpsFunc func() uint64 = func() uint64 { return 0 }
-	getWiFiIPFunc          func() string = func() string { return "" }
-	getDefaultGatewayFunc  func() string = func() string { return "" }
-)
+type NetworkInfo struct {
+	MacAddresses    []string `json:"mac_addresses"`
+	IPAddresses     []string `json:"ip_addresses"`
+	WifiSSID        string   `json:"wifi_ssid"`
+	WifiSignalDBM   float64  `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64 `json:"network_speed_mbps"`
+}
 
-func getWiFiSSID() string       { return getWiFiSSIDFunc() }
-func getWiFiSignalDBM() int     { return getWiFiSignalDBMFunc() }
-func getNetworkSpeedMbps() uint64 { return getNetworkSpeedMbpsFunc() }
-func getWiFiIP() string         { return getWiFiIPFunc() }
-func getDefaultGatewayIP() string { return getDefaultGatewayFunc() }
+func CollectNetworkInfo() NetworkInfo {
+	return NetworkInfo{}
+}
