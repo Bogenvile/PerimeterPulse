@@ -1,6 +1,10 @@
 package collector
 
-// LocationData holds the agent's geographic coordinates
+import (
+	"time"
+)
+
+// LocationData represents a GPS/WiFi location snapshot.
 type LocationData struct {
 	Latitude       float64 `json:"latitude"`
 	Longitude      float64 `json:"longitude"`
@@ -11,7 +15,10 @@ type LocationData struct {
 	Timestamp      string  `json:"timestamp"`
 }
 
-// GetLocation retrieves the current location (platform specific)
-func GetLocation() LocationData {
+// getPlatformLocation is assigned by the platform-specific file (e.g. location_windows.go).
+var getPlatformLocation func() (LocationData, error)
+
+// GetLocation obtains the current location using platform-specific methods.
+func GetLocation() (LocationData, error) {
 	return getPlatformLocation()
 }
