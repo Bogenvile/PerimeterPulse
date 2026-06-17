@@ -71,7 +71,7 @@ func main() {
 				log.Println("Heartbeat sent successfully")
 			}
 
-		case sig := <-sigCh:
+		case <-sigCh:
 			log.Println("Shutting down...")
 			return
 		}
