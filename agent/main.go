@@ -19,7 +19,7 @@ func main() {
 	serverURL := flag.String("server", "", "PerimeterPulse server URL (required)")
 	apiKey := flag.String("apikey", "", "API key for agent authentication (required)")
 	hostnameOverride := flag.String("hostname", "", "Override auto-detected hostname")
-	interval := flag.Int("interval", 60, "Heartbeat interval in seconds")
+	interval := flag.Int("interval",3, "Heartbeat interval in seconds")
 
 	flag.Parse()
 
