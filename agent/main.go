@@ -1,182 +1,160 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"perimeterpulse/agent/buffer"
-	"perimeterpulse/agent/client"
-	"perimeterpulse/agent/collector"
-	"perimeterpulse/agent/commands"
+	"pulse-agent/buffer"
+	"pulse-agent/client"
+	"pulse-agent/collector"
+	"pulse-agent/commands"
 )
 
-const version = "1.0.0"
+var (
+	serverFlag   = flag.String("server", "", "PerimeterPulse server URL (required)")
+	apiKeyFlag   = flag.String("apikey", "", "API key for agent auth (required)")
+	hostnameFlag = flag.String("hostname", "", "Override auto-detected hostname")
+	intervalFlag = flag.Int("interval", 60, "Heartbeat interval in seconds (min 10)")
+)
 
 func main() {
-	serverURL := flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
-	apiKey := flag.String("apikey", "", "API key for agent authentication")
-	hostnameFlag := flag.String("hostname", "", "Override auto-detected hostname")
-	intervalSec := flag.Int("interval", 3, "Heartbeat interval in seconds")
 	flag.Parse()
 
-	if *apiKey == "" {
-		log.Fatal("❌ --apikey is required")
+	if *serverFlag == "" || *apiKeyFlag == "" {
+		fmt.Fprintf(os.Stderr, "Usage: pulse-agent --server <URL> --apikey <KEY> [--hostname <NAME>] [--interval <SECONDS>]\n")
+		os.Exit(1)
 	}
 
-	// Determine hostname
+	// Validate interval
+	interval := *intervalFlag
+	if interval < 10 {
+		interval = 10
+	}
+
+	// Get hostname
 	hostname := *hostnameFlag
 	if hostname == "" {
 		h, err := os.Hostname()
-		if err == nil && h != "" {
-			hostname = h
-		} else {
-			hostname = "unknown"
+		if err != nil {
+			log.Fatalf("Failed to get hostname: %v", err)
 		}
+		hostname = h
 	}
 
-	// Get hardware info
+	// Collect system info
+	sysInfo := collector.CollectSystemInfo()
+	sysInfo.Hostname = hostname
+
+	// Generate stable agent ID
+	agentID := collector.GenerateAgentID(sysInfo)
+
+	// Get OS info
 	osInfo := collector.GetOSInfo()
-	hw := collector.CollectHardware()
 
-	// Generate agent ID
-	agentID := collector.GenerateAgentID(hostname, hw.MACAddresses)
-
-	log.Printf("🖥️  PerimeterPulse Agent v%s", version)
+	log.Printf("🖥️  PerimeterPulse Agent v1.0.0")
 	log.Printf("   Hostname: %s", hostname)
 	log.Printf("   OS: %s %s", osInfo.OS, osInfo.OSVersion)
 	log.Printf("   Agent ID: %s", agentID)
 
 	// Create API client
-	apiClient := client.New(*serverURL, *apiKey, agentID, hostname)
+	api := client.New(*serverFlag, *apiKeyFlag, agentID, hostname)
 
 	// Register with server
-	log.Println("📡 Registering with server...")
-	err := apiClient.Register(client.RegisterPayload{
+	log.Printf("📡 Registering with server...")
+	err := api.Register(collector.RegistrationPayload{
 		Hostname:          hostname,
 		OS:                osInfo.OS,
 		OSVersion:         osInfo.OSVersion,
-		AgentVersion:      version,
-		MACAddresses:      hw.MACAddresses,
-		IPAddresses:       []string{},
-		CPUModel:          hw.CPUModel,
-		CPUCores:          hw.CPUCores,
-		RAMTotalBytes:     hw.RAMTotalBytes,
-		StorageTotalBytes: hw.StorageTotalBytes,
-		DiskModel:         hw.DiskModel,
-		DiskType:          hw.DiskType,
-		WifiSSID:          "",
-		WifiSignalDBm:     0,
-		NetworkSpeedMbps:  0,
+		AgentVersion:      "1.0.0",
+		MACAddresses:      sysInfo.MACAddresses,
+		IPAddresses:       sysInfo.IPAddresses,
+		CPUModel:          sysInfo.CPUModel,
+		CPUCores:          sysInfo.CPUCores,
+		RAMTotalBytes:     sysInfo.RAMTotalBytes,
+		StorageTotalBytes: sysInfo.StorageTotalBytes,
+		DiskModel:         sysInfo.DiskModel,
+		DiskType:          sysInfo.DiskType,
+		WiFiSSID:          sysInfo.WiFiSSID,
+		WiFiSignalDBM:     sysInfo.WiFiSignalDBM,
+		NetworkSpeedMbps:  sysInfo.NetworkSpeedMbps,
 	})
 	if err != nil {
-		log.Printf("⚠️  Registration failed: %v (will retry on first heartbeat)", err)
+		log.Printf("⚠️  Registration warning: %v", err)
 	} else {
-		log.Println("✅ Registered successfully")
+		log.Printf("✅ Registered successfully")
 	}
 
-	// Initialize buffer and command executor
-	offlineBuffer := buffer.NewBuffer()
-	cmdExecutor := commands.NewExecutor()
+	// Start offline buffer
+	buf := buffer.New(api)
+	buf.Start()
 
-	// Heartbeat function
-	sendHeartbeat := func() {
-		metrics := collector.CollectMetrics()
-		networkInfo := collector.CollectNetworkInfo()
-		location := collector.CollectLocation()
+	// Signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-		// Add network diagnostics
-		diag := collector.RunNetworkDiag(networkInfo.DefaultGateway)
-		metrics.NetworkStatus = "up"
-		if !diag.InternetReachable {
-			metrics.NetworkStatus = "degraded"
-		}
-		metrics.GatewayReachable = diag.GatewayReachable
-		metrics.DNSWorking = diag.DNSWorking
-		metrics.InternetReachable = diag.InternetReachable
-		metrics.DefaultGateway = diag.DefaultGateway
+	log.Printf("✅ Agent running. Press Ctrl+C to stop.")
 
-		// Collect error logs
-		metrics.ErrorLogs = collector.GetErrorLogs()
-		metrics.ErrorCount = len(metrics.ErrorLogs)
-
-		err := apiClient.SendHeartbeat(metrics, location, networkInfo)
-		if err != nil {
-			log.Printf("⚠️  Heartbeat failed: %v", err)
-			offlineBuffer.Store(metrics, location, networkInfo)
-		} else {
-			log.Println("💓 Heartbeat sent")
-			// Flush buffered heartbeats
-			offlineBuffer.Flush(func(m, l, n interface{}) error {
-				return apiClient.SendHeartbeat(m, l, n)
-			})
-		}
-	}
-
-	// Check for remote commands
-	checkCommands := func() {
-		cmds, err := apiClient.FetchPendingCommands()
-		if err != nil {
-			return // silently ignore
-		}
-		for _, cmdRaw := range cmds {
-			cmd, ok := cmdRaw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			cmdID, ok := cmd["id"].(float64)
-			if !ok {
-				continue
-			}
-			commandStr, ok := cmd["command"].(string)
-			if !ok {
-				continue
-			}
-
-			// Mark as running
-			apiClient.SendCommandResponse(int(cmdID), client.CommandPayload{Action: "start"})
-
-			// Execute
-			output, err, exitCode := cmdExecutor.Execute(commandStr)
-			action := "complete"
-			var errStr string
-			if err != nil {
-				action = "fail"
-				errStr = err.Error()
-			}
-
-			apiClient.SendCommandResponse(int(cmdID), client.CommandPayload{
-				Action:   action,
-				Output:   output,
-				Error:    errStr,
-				ExitCode: exitCode,
-			})
-		}
-	}
-
-	// Send initial heartbeat
-	sendHeartbeat()
-
-	// Listen for OS signals for graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	ticker := time.NewTicker(time.Duration(*intervalSec) * time.Second)
+	// Main loop
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
 
-	log.Println("✅ Agent running. Press Ctrl+C to stop.")
+	// Send first heartbeat immediately
+	sendHeartbeat(api, hostname, buf)
 
 	for {
 		select {
 		case <-ticker.C:
-			checkCommands()
-			sendHeartbeat()
-		case sig := <-sigCh:
-			log.Printf("🛑 Received %v, shutting down.", sig)
-			return
+			sendHeartbeat(api, hostname, buf)
+		case sig := <-sigChan:
+			log.Printf("🛑 Received %v, shutting down...", sig)
+			buf.Flush()
+			os.Exit(0)
 		}
 	}
+}
+
+func sendHeartbeat(api *client.ApiClient, hostname string, buf *buffer.Buffer) {
+	// Collect metrics
+	metrics := collector.CollectMetrics()
+
+	// Collect location
+	location, locErr := collector.GetLocation()
+	if locErr != nil {
+		log.Printf("[location] ❌ GetLocation error: %v", locErr)
+	} else {
+		log.Printf("[location] 📍 Collected: lat=%.4f lng=%.4f source=%s city=%s country=%s",
+			location.Latitude, location.Longitude, location.Source, location.City, location.Country)
+	}
+
+	// Collect network info
+	networkInfo := collector.CollectNetworkInfo()
+
+	// Fetch pending commands
+	cmds, _ := api.FetchCommands()
+	for _, cmd := range cmds {
+		log.Printf("[commands] Executing #%d: %s", cmd.ID, cmd.Command)
+		execResult := commands.Execute(cmd.Command)
+		status := "completed"
+		if execResult.Error != "" {
+			status = "failed"
+		}
+		api.ReportCommandResult(cmd.ID, "complete", execResult.Output, execResult.Error, execResult.ExitCode)
+		_ = status
+	}
+
+	// Send heartbeat
+	err := api.SendHeartbeat(metrics, location, networkInfo)
+	if err != nil {
+		log.Printf("[heartbeat] ❌ Failed: %v", err)
+		buf.Store(metrics, location, networkInfo)
+		return
+	}
+
+	log.Printf("💓 Heartbeat sent")
 }

@@ -2,8 +2,10 @@ package collector
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"math"
+	"net"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -15,31 +17,66 @@ import (
 	"github.com/shirou/gopsutil/v3/net"
 )
 
-// ──── Metrics ────
-
-type Metrics struct {
-	CPUPercent         float64     `json:"cpu_percent"`
-	RAMPercent         float64     `json:"ram_percent"`
-	RAMUsedBytes       uint64      `json:"ram_used_bytes"`
-	RAMTotalBytes      uint64      `json:"ram_total_bytes"`
-	StoragePercent     float64     `json:"storage_percent"`
-	StorageUsedBytes   uint64      `json:"storage_used_bytes"`
-	StorageTotalBytes  uint64      `json:"storage_total_bytes"`
-	UptimeSeconds      uint64      `json:"uptime_seconds"`
-	NetworkStatus      string      `json:"network_status"`
-	NetworkLatencyMS   float64     `json:"network_latency_ms"`
-	PingLatencyMS      float64     `json:"ping_latency_ms"`
-	ErrorCount         int         `json:"error_count"`
-	ErrorLogs          []ErrorLog  `json:"error_logs,omitempty"`
-	GatewayReachable   bool        `json:"gateway_reachable"`
-	DNSWorking         bool        `json:"dns_working"`
-	InternetReachable  bool        `json:"internet_reachable"`
-	DefaultGateway     string      `json:"default_gateway"`
-	DiskHealthStatus   string      `json:"disk_health_status"`
-	DiskTemperatureC   float64     `json:"disk_temperature_c"`
+// SystemInfo holds static system information
+type SystemInfo struct {
+	Hostname          string
+	MACAddresses      []string
+	IPAddresses       []string
+	CPUModel          string
+	CPUCores          int
+	RAMTotalBytes     uint64
+	StorageTotalBytes uint64
+	DiskModel         string
+	DiskType          string
+	WiFiSSID          string
+	WiFiSignalDBM     int
+	NetworkSpeedMbps  uint64
 }
 
-type ErrorLog struct {
+// RegistrationPayload is sent to the server on first connection
+type RegistrationPayload struct {
+	Hostname          string   `json:"hostname"`
+	OS                string   `json:"os"`
+	OSVersion         string   `json:"os_version"`
+	AgentVersion      string   `json:"agent_version"`
+	MACAddresses      []string `json:"mac_addresses"`
+	IPAddresses       []string `json:"ip_addresses"`
+	CPUModel          string   `json:"cpu_model"`
+	CPUCores          int      `json:"cpu_cores"`
+	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
+	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	DiskModel         string   `json:"disk_model"`
+	DiskType          string   `json:"disk_type"`
+	WiFiSSID          string   `json:"wifi_ssid"`
+	WiFiSignalDBM     int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps  uint64   `json:"network_speed_mbps"`
+}
+
+// MetricsData holds real-time metrics
+type MetricsData struct {
+	CPUPercent        float64            `json:"cpu_percent"`
+	RAMPercent        float64            `json:"ram_percent"`
+	RAMUsedBytes      uint64             `json:"ram_used_bytes"`
+	RAMTotalBytes     uint64             `json:"ram_total_bytes"`
+	StoragePercent    float64            `json:"storage_percent"`
+	StorageUsedBytes  uint64             `json:"storage_used_bytes"`
+	StorageTotalBytes uint64             `json:"storage_total_bytes"`
+	UptimeSeconds     uint64             `json:"uptime_seconds"`
+	NetworkStatus     string             `json:"network_status"`
+	NetworkLatencyMs  float64            `json:"network_latency_ms"`
+	PingLatencyMs     float64            `json:"ping_latency_ms,omitempty"`
+	ErrorCount        int                `json:"error_count,omitempty"`
+	DiskHealthStatus  string             `json:"disk_health_status,omitempty"`
+	DiskTemperatureC  float64            `json:"disk_temperature_c,omitempty"`
+	GatewayReachable  bool               `json:"gateway_reachable,omitempty"`
+	DNSWorking        bool               `json:"dns_working,omitempty"`
+	InternetReachable bool               `json:"internet_reachable,omitempty"`
+	DefaultGateway    string             `json:"default_gateway,omitempty"`
+	Timestamp         string             `json:"timestamp"`
+	ErrorLogs         []ErrorLogEntry    `json:"error_logs,omitempty"`
+}
+
+type ErrorLogEntry struct {
 	Time    string `json:"time"`
 	ID      int    `json:"id"`
 	Level   string `json:"level"`
@@ -47,224 +84,259 @@ type ErrorLog struct {
 	Message string `json:"message"`
 }
 
-// ──── Hardware ────
-
-type Hardware struct {
-	CPUModel          string   `json:"cpu_model"`
-	CPUCores          int      `json:"cpu_cores"`
-	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64   `json:"storage_total_bytes"`
-	MACAddresses      []string `json:"mac_addresses"`
-	DiskModel         string   `json:"disk_model"`
-	DiskType          string   `json:"disk_type"`
+// LocationData holds location information
+type LocationData struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Source    string  `json:"source"`
+	City      string  `json:"city"`
+	Country   string  `json:"country"`
+	Accuracy  float64 `json:"accuracy_meters"`
+	Timestamp string  `json:"timestamp"`
 }
 
-// ──── OS Info ────
+// NetworkInfo holds network information
+type NetworkInfo struct {
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps uint64   `json:"network_speed_mbps"`
+	IPAddresses      []string `json:"ip_addresses"`
+	WiFiIP           string   `json:"wifi_ip,omitempty"`
+	GatewayIP        string   `json:"gateway_ip,omitempty"`
+}
 
+// OSInfo holds OS information
 type OSInfo struct {
 	OS        string `json:"os"`
 	OSVersion string `json:"os_version"`
 }
 
-// ──── Network Info ────
+// CollectSystemInfo collects static system information
+func CollectSystemInfo() SystemInfo {
+	info := SystemInfo{}
 
-type NetworkInfo struct {
-	IPAddresses      []string `json:"ip_addresses"`
-	WifiSSID         string   `json:"wifi_ssid"`
-	WifiSignalDBm    int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps int      `json:"network_speed_mbps"`
-	DefaultGateway   string   `json:"gateway_ip"`
-}
-
-// ──── Location ────
-
-type Location struct {
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AccuracyMeters float64 `json:"accuracy_meters"`
-	Source         string  `json:"source"`
-	City           string  `json:"city,omitempty"`
-	Country        string  `json:"country,omitempty"`
-}
-
-// ──── Network Diag ────
-
-type NetworkDiag struct {
-	GatewayReachable  bool   `json:"gateway_reachable"`
-	DNSWorking        bool   `json:"dns_working"`
-	InternetReachable bool   `json:"internet_reachable"`
-	DefaultGateway    string `json:"default_gateway"`
-}
-
-// ──── Collectors ────
-
-func GetOSInfo() OSInfo {
-	info := OSInfo{OS: runtime.GOOS}
-	h, err := host.Info()
+	// Get host info for uptime etc
+	hostInfo, err := host.Info()
 	if err == nil {
-		info.OSVersion = h.PlatformVersion
-		if info.OS == "windows" {
-			info.OS = "Windows"
-		} else if info.OS == "linux" {
-			info.OS = "Linux"
-		}
+		// Hostname already set by caller
+		info.Hostname = hostInfo.Hostname
 	}
-	return info
-}
 
-func CollectHardware() Hardware {
-	hw := Hardware{}
-
-	// CPU
+	// CPU Info
 	cpuInfo, err := cpu.Info()
 	if err == nil && len(cpuInfo) > 0 {
-		hw.CPUModel = strings.TrimSpace(cpuInfo[0].ModelName)
-		hw.CPUCores = int(cpuInfo[0].Cores)
+		info.CPUModel = cpuInfo[0].ModelName
+		info.CPUCores = len(cpuInfo)
 	}
 
-	// RAM
-	v, err := mem.VirtualMemory()
+	// Memory
+	memInfo, err := mem.VirtualMemory()
 	if err == nil {
-		hw.RAMTotalBytes = v.Total
+		info.RAMTotalBytes = memInfo.Total
 	}
 
-	// Disk
+	// Storage
 	partitions, err := disk.Partitions(false)
 	if err == nil {
-		for _, p := range partitions {
-			usage, err := disk.Usage(p.Mountpoint)
+		for _, part := range partitions {
+			usage, err := disk.Usage(part.Mountpoint)
 			if err == nil {
-				hw.StorageTotalBytes += usage.Total
+				info.StorageTotalBytes = usage.Total
+				break
 			}
 		}
 	}
 
-	// MAC
+	// Network interfaces
 	interfaces, err := net.Interfaces()
 	if err == nil {
 		for _, iface := range interfaces {
-			if iface.HardwareAddr != "" && len(iface.HardwareAddr) > 0 {
-				hw.MACAddresses = append(hw.MACAddresses, iface.HardwareAddr)
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
 			}
-		}
-	}
-
-	// Disk type (simplified)
-	hw.DiskType = "unknown"
-	hw.DiskModel = "Unknown"
-
-	return hw
-}
-
-func CollectNetworkInfo() NetworkInfo {
-	ni := NetworkInfo{}
-
-	interfaces, err := net.Interfaces()
-	if err == nil {
-		for _, iface := range interfaces {
-			if len(iface.Flags) > 0 && iface.Flags[0] == "up" {
-				for _, addr := range iface.Addrs {
-					ni.IPAddresses = append(ni.IPAddresses, addr.Addr)
+			if iface.HardwareAddr.String() != "" {
+				info.MACAddresses = append(info.MACAddresses, iface.HardwareAddr.String())
+			}
+			addrs, err := iface.Addrs()
+			if err == nil {
+				for _, addr := range addrs {
+					ipStr := strings.Split(addr.String(), "/")[0]
+					if ipStr != "" && !strings.HasPrefix(ipStr, "127.") && !strings.HasPrefix(ipStr, "::1") {
+						info.IPAddresses = append(info.IPAddresses, ipStr)
+					}
 				}
 			}
 		}
 	}
 
-	// Basic gateway detection (not reliable, but we'll use default route)
-	ni.DefaultGateway = detectDefaultGateway()
-
-	// WiFi info (platform-specific stubs - we'll keep simple)
-	ni.WifiSSID = getWifiSSID()
-	ni.WifiSignalDBm = getWifiSignal()
-	ni.NetworkSpeedMbps = 0
-
-	return ni
+	return info
 }
 
-func CollectMetrics() Metrics {
-	m := Metrics{}
+// CollectMetrics collects real-time system metrics
+func CollectMetrics() MetricsData {
+	m := MetricsData{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
 
 	// CPU
-	cpuPercent, err := cpu.Percent(time.Second, false)
+	cpuPercent, err := cpu.Percent(0, false)
 	if err == nil && len(cpuPercent) > 0 {
-		m.CPUPercent = math.Round(cpuPercent[0]*10) / 10
+		m.CPUPercent = cpuPercent[0]
 	}
 
-	// RAM
-	v, err := mem.VirtualMemory()
+	// Memory
+	memInfo, err := mem.VirtualMemory()
 	if err == nil {
-		m.RAMPercent = math.Round(v.UsedPercent*10) / 10
-		m.RAMUsedBytes = v.Used
-		m.RAMTotalBytes = v.Total
+		m.RAMPercent = memInfo.UsedPercent
+		m.RAMUsedBytes = memInfo.Used
+		m.RAMTotalBytes = memInfo.Total
 	}
 
-	// Disk
+	// Storage
 	partitions, err := disk.Partitions(false)
 	if err == nil {
-		var totalUsed, totalAll uint64
-		for _, p := range partitions {
-			usage, err := disk.Usage(p.Mountpoint)
+		for _, part := range partitions {
+			usage, err := disk.Usage(part.Mountpoint)
 			if err == nil {
-				totalUsed += usage.Used
-				totalAll += usage.Total
+				m.StoragePercent = usage.UsedPercent
+				m.StorageUsedBytes = usage.Used
+				m.StorageTotalBytes = usage.Total
+				break
 			}
-		}
-		if totalAll > 0 {
-			m.StoragePercent = math.Round(float64(totalUsed)/float64(totalAll)*1000) / 10
-			m.StorageUsedBytes = totalUsed
-			m.StorageTotalBytes = totalAll
 		}
 	}
 
 	// Uptime
-	up, err := host.Uptime()
+	hostInfo, err := host.Info()
 	if err == nil {
-		m.UptimeSeconds = up
+		m.UptimeSeconds = hostInfo.Uptime
 	}
 
-	m.NetworkStatus = "up"
-	m.DiskHealthStatus = "unknown"
+	// Network diagnostics
+	diag := RunNetworkDiag()
+	m.NetworkStatus = diag.Status
+	m.NetworkLatencyMs = diag.LatencyMs
+	m.GatewayReachable = diag.GatewayReachable
+	m.DNSWorking = diag.DNSWorking
+	m.InternetReachable = diag.InternetReachable
+	m.DefaultGateway = diag.DefaultGateway
+
+	// Ping latency
+	pingMs, err := PingGoogle()
+	if err == nil {
+		m.PingLatencyMs = pingMs
+	}
 
 	return m
 }
 
-func CollectLocation() Location {
-	// Default: no location (server will use GeoIP fallback)
-	return Location{
-		Latitude:       0,
-		Longitude:      0,
-		AccuracyMeters: 0,
-		Source:         "unknown",
+// CollectNetworkInfo collects network information
+func CollectNetworkInfo() NetworkInfo {
+	info := NetworkInfo{}
+
+	// Get IP addresses from active interfaces
+	interfaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range interfaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err == nil {
+				for _, addr := range addrs {
+					ipStr := strings.Split(addr.String(), "/")[0]
+					if ipStr != "" && !strings.HasPrefix(ipStr, "127.") && !strings.HasPrefix(ipStr, "::1") {
+						info.IPAddresses = append(info.IPAddresses, ipStr)
+					}
+				}
+			}
+		}
+	}
+
+	// Try to get WiFi info (platform-specific)
+	info.WiFiSSID = getWiFiSSID()
+	info.WiFiSignalDBM = getWiFiSignalDBM()
+	info.NetworkSpeedMbps = getNetworkSpeedMbps()
+
+	// Try to get WiFi IP and Gateway
+	info.WiFiIP = getWiFiIP()
+	info.GatewayIP = getDefaultGatewayIP()
+
+	return info
+}
+
+// determineDiskModel determines disk model and type
+func determineDiskModel() (model string, diskType string) {
+	partitions, err := disk.Partitions(false)
+	if err != nil {
+		return "Unknown", "unknown"
+	}
+
+	for _, part := range partitions {
+		// Get usage to make sure it's a real filesystem
+		_, err := disk.Usage(part.Mountpoint)
+		if err != nil {
+			continue
+		}
+
+		// Try to get serial/IO counters for device type detection
+		device := part.Device
+		// On Windows, device looks like "C:" — we want the physical drive
+		if runtime.GOOS == "windows" {
+			// For Windows, we can try to get the model via WMI/PowerShell
+			// but for now use the device name as model
+			model = device
+			diskType = "SSD" // Assume SSD for modern Windows
+		} else {
+			// On Linux, device is like "/dev/sda1"
+			model = device
+			if strings.Contains(device, "nvme") {
+				diskType = "NVMe"
+			} else if strings.Contains(device, "sd") {
+				diskType = "SSD"
+			} else if strings.Contains(device, "hd") {
+				diskType = "HDD"
+			} else {
+				diskType = "unknown"
+			}
+		}
+		break
+	}
+	return
+}
+
+// GetLocation gets platform-specific location
+func GetLocation() (LocationData, error) {
+	if getPlatformLocation != nil {
+		return getPlatformLocation()
+	}
+	return LocationData{
+		Source: "unavailable",
+	}, fmt.Errorf("platform location not available")
+}
+
+// getPlatformLocation is set by platform-specific init()
+var getPlatformLocation func() (LocationData, error)
+
+// GetOSInfo returns OS information
+func GetOSInfo() OSInfo {
+	return OSInfo{
+		OS:        runtime.GOOS,
+		OSVersion: getOSVersion(),
 	}
 }
 
-func RunNetworkDiag(gateway string) NetworkDiag {
-	return NetworkDiag{
-		GatewayReachable:  true, // simplified — we assume reachable
-		DNSWorking:        true,
-		InternetReachable: true,
-		DefaultGateway:    gateway,
+func getOSVersion() string {
+	hostInfo, err := host.Info()
+	if err != nil {
+		return "unknown"
 	}
+	return hostInfo.PlatformVersion
 }
 
-var errorLogs []ErrorLog
-
-func GetErrorLogs() []ErrorLog {
-	logs := errorLogs
-	errorLogs = nil
-	return logs
+// GenerateAgentID generates a stable agent ID from system info
+func GenerateAgentID(info SystemInfo) string {
+	data := info.Hostname + strings.Join(info.MACAddresses, ",")
+	hash := sha256.Sum256([]byte(data))
+	return "agent-" + hex.EncodeToString(hash[:8])
 }
-
-func GenerateAgentID(hostname string, macs []string) string {
-	h := sha256.New()
-	h.Write([]byte(hostname))
-	for _, mac := range macs {
-		h.Write([]byte(mac))
-	}
-	return fmt.Sprintf("agent-%x", h.Sum(nil)[:8])
-}
-
-// Platform-specific stubs (implemented in _windows.go and _linux.go)
-var detectDefaultGateway = func() string { return "" }
-var getWifiSSID = func() string { return "" }
-var getWifiSignal = func() int { return 0 }
