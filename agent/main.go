@@ -1,4 +1,4 @@
-heartbeat setiap interval">
+heartbeat setiap 60 detik">
 package main
 
 import (
@@ -24,7 +24,6 @@ func main() {
 		log.Fatal("--apikey is required")
 	}
 
-	// ── Kumpulkan info awal ──
 	sysInfo := collector.CollectSystemInfo()
 	osName, osVer := collector.GetOSInfo()
 	_ = osName
@@ -38,21 +37,18 @@ func main() {
 	log.Printf("[main] Agent ID: %s | Hostname: %s | OS: %s %s",
 		agentID, sysInfo.Hostname, osName, osVer)
 
-	// ── Client ──
 	apiClient := client.NewClient(*serverURL, *apiKey)
 	offlineBuf, err := buffer.NewFileBuffer("pulse-buffer.jsonl")
 	if err != nil {
 		log.Printf("[main] Buffer warn: %v", err)
 	}
 
-	// ── Graceful shutdown ──
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
-	// ── Loop ──
 	for {
 		metrics := collector.CollectMetrics(sysInfo.DiskType)
 		netInfo := collector.CollectNetworkInfo()
@@ -72,7 +68,6 @@ func main() {
 			}
 		} else {
 			log.Printf("[main] Heartbeat OK")
-			// Flush offline buffer setelah sukses
 			if offlineBuf != nil {
 				entries, _ := offlineBuf.ReadAll()
 				for _, e := range entries {
