@@ -7,50 +7,44 @@ import (
 	"time"
 )
 
-// LocationInfo holds geographic location data
-type LocationInfo struct {
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AccuracyMeters float64 `json:"accuracy_meters"`
-	Source         string  `json:"source"`
-	City           string  `json:"city"`
-	Country        string  `json:"country"`
-	Timestamp      string  `json:"timestamp"`
+// init registers the Windows GeoIP‑based location implementation.
+func init() {
+	getPlatformLocation = windowsGetLocation
 }
 
-type geoIPResponse struct {
-	Status      string  `json:"status"`
-	Country     string  `json:"country"`
-	CountryCode string  `json:"countryCode"`
-	Region      string  `json:"region"`
-	RegionName  string  `json:"regionName"`
-	City        string  `json:"city"`
-	Lat         float64 `json:"lat"`
-	Lon         float64 `json:"lon"`
-	Timezone    string  `json:"timezone"`
-	Query       string  `json:"query"`
-}
-
-// getPlatformLocation is called by location.go to get location on Windows.
-func getPlatformLocation() (*LocationInfo, error) {
+// windowsGetLocation obtains approximate location using ip-api.com.
+// On Windows, the native geolocation API requires CGO which we avoid,
+// so GeoIP is the primary source.
+func windowsGetLocation() (LocationData, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	resp, err := client.Get("http://ip-api.com/json/?fields=status,country,countryCode,region,regionName,city,lat,lon,timezone,query")
 	if err != nil {
-		return nil, fmt.Errorf("geoip request failed: %w", err)
+		return LocationData{}, fmt.Errorf("geoip request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var geo geoIPResponse
+	var geo struct {
+		Status      string  `json:"status"`
+		Country     string  `json:"country"`
+		CountryCode string  `json:"countryCode"`
+		Region      string  `json:"region"`
+		RegionName  string  `json:"regionName"`
+		City        string  `json:"city"`
+		Lat         float64 `json:"lat"`
+		Lon         float64 `json:"lon"`
+		Timezone    string  `json:"timezone"`
+		Query       string  `json:"query"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&geo); err != nil {
-		return nil, fmt.Errorf("geoip decode failed: %w", err)
+		return LocationData{}, fmt.Errorf("geoip decode failed: %w", err)
 	}
 
 	if geo.Status != "success" {
-		return nil, fmt.Errorf("geoip lookup failed: %s", geo.Status)
+		return LocationData{}, fmt.Errorf("geoip lookup failed: %s", geo.Status)
 	}
 
-	return &LocationInfo{
+	return LocationData{
 		Latitude:       geo.Lat,
 		Longitude:      geo.Lon,
 		AccuracyMeters: 5000,
