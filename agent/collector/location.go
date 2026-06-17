@@ -1,9 +1,5 @@
 package collector
 
-import (
-	"time"
-)
-
 // LocationData represents a GPS/WiFi location snapshot.
 type LocationData struct {
 	Latitude       float64 `json:"latitude"`
