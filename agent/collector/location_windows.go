@@ -1,10 +1,3 @@
-// +build windows
-
 package collector
 
-import "fmt"
-
-func getPlatformLocation() (LocationData, error) {
-	// TODO: Implement Windows Geolocator API for real location
-	return LocationData{}, fmt.Errorf("Windows location not implemented")
-}
+// Windows-specific location is not implemented yet – fallback to GeoIP in location.go
