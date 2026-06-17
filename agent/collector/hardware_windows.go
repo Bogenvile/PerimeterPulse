@@ -1,73 +1,195 @@
-//go:build windows
-
 package collector
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 )
 
-func collectDiskHealthWindows() (status string, tempC float64) {
-	cmd := exec.Command("cmd", "/c", "wmic diskdrive get Status")
-	out, err := cmd.Output()
-	if err != nil {
-		return "unknown", 0
+func collectWindowsHardware() SystemInfo {
+	hostname, _ := os.Hostname()
+	macs := getWindowsMACs()
+	ips := getWindowsIPs()
+	cpu := getWindowsCPU()
+	cores := getWindowsCPUCores()
+	ram := getWindowsRAM()
+	storage := getWindowsStorage()
+	diskModel, diskType := getWindowsDisk()
+	wifiSSID, wifiSignal := getWindowsWiFi()
+	speed := getWindowsNetworkSpeed()
+
+	return SystemInfo{
+		Hostname:         hostname,
+		MACAddresses:     macs,
+		IPAddresses:      ips,
+		CPUModel:         cpu,
+		CPUCores:         cores,
+		RAMTotalBytes:    ram,
+		StorageTotalBytes: storage,
+		DiskModel:        diskModel,
+		DiskType:         diskType,
+		WiFiSSID:         wifiSSID,
+		WiFiSignalDBM:    wifiSignal,
+		NetworkSpeedMbps: speed,
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range lines {
-		l := strings.TrimSpace(line)
-		if l == "OK" {
-			return "ok", 0
-		} else if l != "" && !strings.EqualFold(l, "Status") {
-			return strings.ToLower(l), 0
-		}
-	}
-	return "ok", 0
 }
 
-func collectCPUModelWindows() string {
-	cmd := exec.Command("wmic", "cpu", "get", "name")
+func collectWindowsOSVersion() string {
+	cmd := exec.Command("cmd", "/c", "ver")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func getWindowsMACs() []string {
+	cmd := exec.Command("powershell", "-Command",
+		"Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty MacAddress")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var macs []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		m := strings.TrimSpace(line)
+		if m != "" {
+			macs = append(macs, m)
+		}
+	}
+	return macs
+}
+
+func getWindowsIPs() []string {
+	cmd := exec.Command("powershell", "-Command",
+		"Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' } | Select-Object -ExpandProperty IPAddress")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var ips []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		ip := strings.TrimSpace(line)
+		if ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
+}
+
+func getWindowsCPU() string {
+	cmd := exec.Command("powershell", "-Command", "(Get-CimInstance Win32_Processor).Name")
 	out, err := cmd.Output()
 	if err != nil {
 		return "Unknown"
 	}
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && !strings.EqualFold(trimmed, "Name") {
-			return trimmed
-		}
-	}
-	return "Unknown"
+	return strings.TrimSpace(string(out))
 }
 
-func collectDiskInfoWindows() (model string, diskType string) {
-	cmd := exec.Command("wmic", "diskdrive", "get", "Model,MediaType")
+func getWindowsCPUCores() int {
+	cmd := exec.Command("powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors")
 	out, err := cmd.Output()
 	if err != nil {
-		return "Unknown", "unknown"
+		return 0
 	}
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "Model") {
-			continue
-		}
-		parts := strings.Fields(trimmed)
-		if len(parts) >= 2 {
-			mediaType := parts[len(parts)-1]
-			model = strings.Join(parts[:len(parts)-1], " ")
-			switch {
-			case strings.Contains(mediaType, "SSD"):
-				diskType = "SSD"
-			case strings.Contains(mediaType, "HDD"):
-				diskType = "HDD"
-			default:
-				diskType = "unknown"
+	cores := 0
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &cores)
+	return cores
+}
+
+func getWindowsRAM() int64 {
+	cmd := exec.Command("powershell", "-Command",
+		"(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	var ram int64
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &ram)
+	return ram
+}
+
+func getWindowsStorage() int64 {
+	cmd := exec.Command("powershell", "-Command",
+		"(Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=\"C:\"').Size")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	var size int64
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &size)
+	return size
+}
+
+func getWindowsDisk() (string, string) {
+	cmd := exec.Command("powershell", "-Command",
+		"(Get-PhysicalDisk | Select-Object FriendlyName, MediaType | Format-List)")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", "unknown"
+	}
+	text := string(out)
+	model := ""
+	mediaType := "unknown"
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "FriendlyName") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				model = strings.TrimSpace(parts[1])
 			}
-			return
 		}
-		model = trimmed
+		if strings.HasPrefix(line, "MediaType") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				mediaType = strings.TrimSpace(parts[1])
+			}
+		}
 	}
-	return "Unknown", "unknown"
+	return model, mediaType
+}
+
+func getWindowsWiFi() (string, int) {
+	cmd := exec.Command("netsh", "wlan", "show", "interfaces")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", 0
+	}
+	text := string(out)
+	ssid := ""
+	signal := 0
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "SSID") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				ssid = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.HasPrefix(line, "Signal") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				s := strings.TrimSpace(parts[1])
+				s = strings.TrimSuffix(s, "%")
+				fmt.Sscanf(s, "%d", &signal)
+			}
+		}
+	}
+	return ssid, signal
+}
+
+func getWindowsNetworkSpeed() float64 {
+	cmd := exec.Command("powershell", "-Command",
+		"(Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 -ExpandProperty LinkSpeed)")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	speed := strings.TrimSpace(string(out))
+	// LinkSpeed is typically like "1 Gbps" or "100 Mbps"
+	speed = strings.Replace(speed, " Gbps", "000", 1)
+	speed = strings.Replace(speed, " Mbps", "", 1)
+	var mbps float64
+	fmt.Sscanf(speed, "%f", &mbps)
+	return mbps
 }
