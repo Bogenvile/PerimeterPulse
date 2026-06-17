@@ -1,8 +1,6 @@
 package collector
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // LocationData holds location information
 type LocationData struct {
@@ -23,7 +21,5 @@ func GetLocation() (LocationData, error) {
 	if getPlatformLocation != nil {
 		return getPlatformLocation()
 	}
-	return LocationData{
-		Source: "unavailable",
-	}, fmt.Errorf("platform location not available")
+	return LocationData{Source: "unavailable"}, fmt.Errorf("platform location not available")
 }
