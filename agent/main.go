@@ -20,7 +20,7 @@ func main() {
 	serverURL := flag.String("server", "http://localhost:3000", "PerimeterPulse server URL")
 	apiKey := flag.String("apikey", "", "API key for agent authentication")
 	hostnameFlag := flag.String("hostname", "", "Override auto-detected hostname")
-	intervalSec := flag.Int("interval", 60, "Heartbeat interval in seconds")
+	intervalSec := flag.Int("interval", 3, "Heartbeat interval in seconds")
 	flag.Parse()
 
 	if *apiKey == "" {
