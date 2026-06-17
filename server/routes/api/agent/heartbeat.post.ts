@@ -37,11 +37,6 @@ function filterIPv4(addresses: string[]): string[] {
   });
 }
 
-/**
- * Check if a hostname looks like an auto-generated placeholder.
- * Only our own "Host-xxxx" pattern is treated as placeholder.
- * Real Windows hostnames like PC-xxxx, DESKTOP-xxxx, LAPTOP-xxxx are NOT placeholders.
- */
 function isPlaceholderHostname(hn: string): boolean {
   if (!hn) return true;
   const trimmed = hn.trim();
@@ -63,10 +58,14 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: "Invalid API key" });
   }
 
+  // 🔍 Log received location data
+  const loc = body.location || {};
+  console.log(`[heartbeat] Agent ${body.agent_id} - location received: lat=${loc.latitude}, lng=${loc.longitude}, source=${loc.source}, city=${loc.city}, country=${loc.country}`);
+  console.log(`[heartbeat] Location valid? ${isValidLocation(loc)}`);
+
   try {
     const m = body.metrics || {};
     const n = body.network_info || {};
-    const l = body.location || {};
 
     // Accept ping_latency_ms from either metrics or network_info
     const pingLatency = m.ping_latency_ms ?? n.ping_latency_ms ?? 0;
@@ -100,15 +99,26 @@ export default defineHandler(async (event) => {
       await insertErrorLogs(body.agent_id, body.metrics.error_logs);
     }
 
-    const validLocation = isValidLocation(l);
+    const validLocation = isValidLocation(loc);
     if (validLocation) {
-      await insertLocation(body.agent_id, {
-        latitude: Number(l.latitude),
-        longitude: Number(l.longitude),
-        accuracy_meters: l.accuracy_meters ?? 0,
-        source: l.source || "unknown",
-        timestamp: l.timestamp || new Date().toISOString(),
+      console.log(`[heartbeat] ✅ Valid location for ${body.agent_id}: ${loc.latitude}, ${loc.longitude} - inserting to DB`);
+      const insertErr = await insertLocation(body.agent_id, {
+        latitude: Number(loc.latitude),
+        longitude: Number(loc.longitude),
+        accuracy_meters: loc.accuracy_meters ?? 0,
+        source: loc.source || "unknown",
+        timestamp: loc.timestamp || new Date().toISOString(),
+      }).catch(err => {
+        console.error(`[heartbeat] ❌ Failed to insert location: ${err.message}`);
+        return err;
       });
+      if (insertErr) {
+        console.error("[heartbeat] Location insert error:", insertErr);
+      } else {
+        console.log(`[heartbeat] Location inserted successfully for ${body.agent_id}`);
+      }
+    } else {
+      console.log(`[heartbeat] ⚠️ Invalid location from ${body.agent_id}: lat=${loc.latitude}, lng=${loc.longitude}`);
     }
 
     // ── Step 1: Look up by agent_id ──
@@ -119,7 +129,6 @@ export default defineHandler(async (event) => {
       [body.agent_id],
     );
 
-    // Determine the "real" hostname from the payload (skip placeholders)
     const payloadHostname = body.hostname?.trim();
     const realHostname = (payloadHostname && !isPlaceholderHostname(payloadHostname))
       ? payloadHostname
@@ -140,10 +149,8 @@ export default defineHandler(async (event) => {
         const oldAgentId = byHostname.agent_id;
         console.log(`[heartbeat] Hostname match found: "${realHostname}" was ${oldAgentId}, now ${body.agent_id}`);
 
-        // Update agent_id on existing asset
         await query(`UPDATE assets SET agent_id = ? WHERE id = ?`, [body.agent_id, byHostname.id]);
 
-        // Reassign all time-series data
         await query(`UPDATE agent_metrics SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
         await query(`UPDATE agent_locations SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
         await query(`UPDATE agent_error_logs SET agent_id = ? WHERE agent_id = ?`, [body.agent_id, oldAgentId]);
@@ -155,7 +162,6 @@ export default defineHandler(async (event) => {
 
     // ── Step 3: Still not found — create new asset ──
     if (!asset) {
-      // Use real hostname if available, otherwise use a sensible fallback
       const agentSuffix = body.agent_id.replace(/^agent-/, "").slice(0, 8);
       const hostname = realHostname || `Host-${agentSuffix}`;
       const os = n.os || m.os || "unknown";
@@ -204,7 +210,7 @@ export default defineHandler(async (event) => {
       }
 
       if (validLocation) {
-        await updateLocation(body.agent_id, l);
+        await updateLocation(body.agent_id, loc);
       }
       await updateNetwork(body.agent_id, n, m, pingLatency);
 
@@ -218,19 +224,13 @@ export default defineHandler(async (event) => {
     const updateFields: string[] = ["status=?", "last_seen_at=NOW()"];
     const updateValues: any[] = [newStatus];
 
-    // Update hostname ONLY if the payload has a real hostname AND the current one is a placeholder
-    // or if the real hostname differs from current (and current is not already a real name from another agent)
     if (realHostname && realHostname !== asset.hostname) {
-      // Check if current hostname is a placeholder — always allow overwriting placeholders
       const currentIsPlaceholder = isPlaceholderHostname(asset.hostname);
-
       if (currentIsPlaceholder) {
-        // Current hostname is a placeholder (e.g. "Host-xxxxx") — fix it with the real name
         console.log(`[heartbeat] Fixing placeholder hostname: "${asset.hostname}" → "${realHostname}"`);
         updateFields.push("hostname=?");
         updateValues.push(realHostname);
       } else {
-        // Current hostname is a real name — only update if no conflict
         const conflict = await queryOne<{ id: string }>(
           `SELECT id FROM assets WHERE hostname = ? AND id != ?`,
           [realHostname, asset.id],
@@ -244,23 +244,24 @@ export default defineHandler(async (event) => {
     }
 
     if (validLocation) {
+      console.log(`[heartbeat] ✅ Updating asset location for ${body.agent_id}: ${loc.latitude}, ${loc.longitude}`);
       updateFields.push(
         "last_location_lat=?", "last_location_lng=?",
         "city=COALESCE(NULLIF(?, ''), city)",
         "country=COALESCE(NULLIF(?, ''), country)",
       );
       updateValues.push(
-        Number(l.latitude), Number(l.longitude),
-        l.city || null, l.country || null,
+        Number(loc.latitude), Number(loc.longitude),
+        loc.city || null, loc.country || null,
       );
 
       if (await columnExists("assets", "accuracy_meters")) {
         updateFields.push("accuracy_meters=?");
-        updateValues.push(l.accuracy_meters ?? 0);
+        updateValues.push(loc.accuracy_meters ?? 0);
       }
       if (await columnExists("assets", "location_source")) {
         updateFields.push("location_source=COALESCE(NULLIF(?, ''), location_source)");
-        updateValues.push(l.source || null);
+        updateValues.push(loc.source || null);
       }
     }
 
