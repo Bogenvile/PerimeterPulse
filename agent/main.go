@@ -36,16 +36,16 @@ func main() {
 		sysInfo.Hostname = *hostnameOverride
 	}
 
-	osInfo := collector.GetOSInfo()
-	agentID := collector.GenerateAgentID(sysInfo.Hostname, sysInfo.MACAddresses)
+	osInfo, _ := collector.GetOSInfo()
+	agentID := collector.GenerateAgentID(sysInfo.Hostname, sysInfo.MacAddresses)
 
 	log.Printf("Agent ID: %s | Hostname: %s | OS: %s %s\n",
 		agentID, sysInfo.Hostname, osInfo.OS, osInfo.OSVersion)
 
-	apiClient := client.NewClient(*serverURL, *apiKey, agentID)
+	apiClient := client.NewClient(*serverURL, *apiKey)
 
 	log.Println("Registering agent with server...")
-	if err := apiClient.Register(sysInfo, osInfo, version); err != nil {
+	if err := client.Register(apiClient, sysInfo, osInfo, version); err != nil {
 		log.Printf("Warning: Registration failed: %v (will retry on first heartbeat)\n", err)
 	}
 
@@ -61,17 +61,17 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			metrics := collector.CollectMetrics()
+			metrics := collector.CollectMetrics(agentID)
 			network := collector.CollectNetworkInfo()
 			location := collector.CollectLocation()
 
-			if err := apiClient.SendHeartbeat(metrics, network, location); err != nil {
+			if err := apiClient.SendHeartbeat(agentID, metrics, network, location); err != nil {
 				log.Printf("Heartbeat failed: %v\n", err)
 			} else {
 				log.Println("Heartbeat sent successfully")
 			}
 
-		case sig := <-sigCh:
+		case <-sigCh:
 			log.Println("Shutting down...")
 			return
 		}
