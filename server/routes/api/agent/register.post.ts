@@ -13,11 +13,10 @@ interface RegisterBody {
   wifi_ssid?: string; wifi_signal_dbm?: number; network_speed_mbps?: number;
 }
 
-/**
- * Check if a hostname looks like an auto-generated placeholder.
- * Only our own "Host-xxxx" pattern is treated as placeholder.
- * Real Windows hostnames like PC-xxxx, DESKTOP-xxxx, LAPTOP-xxxx are NOT placeholders.
- */
+function isH3Error(err: unknown): err is { statusCode: number; statusMessage: string } {
+  return typeof err === "object" && err !== null && "statusCode" in err && "statusMessage" in err;
+}
+
 function isPlaceholderHostname(hn: string): boolean {
   if (!hn) return true;
   const trimmed = hn.trim();
@@ -44,26 +43,20 @@ export default defineHandler(async (event) => {
     const macsJson = JSON.stringify(body.mac_addresses || []);
     const ipsJson = JSON.stringify(body.ip_addresses || []);
 
-    // ── Primary lookup: by hostname ──
     const existing = await queryOne<{ id: string; agent_id: string; hostname: string }>(
       `SELECT id, agent_id, hostname FROM assets WHERE hostname = ? ORDER BY last_seen_at DESC LIMIT 1`,
       [rawHostname],
     );
 
     if (existing) {
-      // Asset found by hostname
       const existingIsPlaceholder = isPlaceholderHostname(existing.hostname);
-
-      // If the new hostname is valid and the existing one is a placeholder, fix it
       if (!hostnameIsPlaceholder && existingIsPlaceholder) {
         console.log(`[register] Fixing placeholder hostname: "${existing.hostname}" → "${rawHostname}" (agent: ${agentId})`);
         await query(`UPDATE assets SET hostname = ? WHERE id = ?`, [rawHostname, existing.id]);
       }
 
-      // Update agent_id on the existing asset
       console.log(`[register] Updating existing asset "${rawHostname}" (${existing.agent_id} → ${agentId})`);
 
-      // Clean up duplicates with same hostname
       const duplicates = await query<{ id: string; agent_id: string }>(
         `SELECT id, agent_id FROM assets WHERE hostname = ? AND id != ?`,
         [rawHostname, existing.id],
@@ -81,10 +74,9 @@ export default defineHandler(async (event) => {
         console.log(`[register] Removed duplicate: ${dup.agent_id} (${rawHostname})`);
       }
 
-      // Update asset info — but DON'T overwrite a real hostname with a placeholder
       const finalHostname = (hostnameIsPlaceholder && !existingIsPlaceholder)
-        ? existing.hostname  // Keep the existing real hostname
-        : rawHostname;        // Use the new one (real or both placeholder)
+        ? existing.hostname
+        : rawHostname;
 
       await query(
         `UPDATE assets SET
@@ -104,19 +96,17 @@ export default defineHandler(async (event) => {
         ],
       );
     } else {
-      // No asset with this hostname — check if agent_id already exists
       const byAgentId = await queryOne<{ id: string; hostname: string }>(
         `SELECT id, hostname FROM assets WHERE agent_id = ?`,
         [agentId],
       );
 
       if (byAgentId) {
-        // Agent ID already exists — update it, but keep existing hostname if the new one is a placeholder
         const currentHostname = byAgentId.hostname;
         const currentIsPlaceholder = isPlaceholderHostname(currentHostname);
         const finalHostname = (hostnameIsPlaceholder && !currentIsPlaceholder)
-          ? currentHostname  // Keep existing real hostname
-          : rawHostname;      // Use the new one
+          ? currentHostname
+          : rawHostname;
 
         console.log(`[register] Agent ${agentId} re-registering, updating hostname: "${currentHostname}" → "${finalHostname}"`);
         await query(
@@ -137,15 +127,12 @@ export default defineHandler(async (event) => {
           ],
         );
       } else {
-        // Brand new asset
-        // If hostname is a placeholder, use a clear auto-generated name
         const finalHostname = hostnameIsPlaceholder
           ? `Host-${agentId.replace(/^agent-/, "").slice(0, 8)}`
           : rawHostname;
 
         console.log(`[register] Creating new asset: "${finalHostname}" (${agentId})`);
 
-        // 17 columns: agent_id..network_speed_mbps + status (16 params + 'offline' = 17 values)
         await query(
           `INSERT INTO assets
             (agent_id, hostname, os, os_version, agent_version,
@@ -166,6 +153,10 @@ export default defineHandler(async (event) => {
 
     return { ok: true, agent_id: agentId };
   } catch (err: unknown) {
+    // Re-throw H3 errors as-is (don't wrap them as 500)
+    if (isH3Error(err)) {
+      throw err;
+    }
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error("Agent register error:", msg, err);
     throw createError({
