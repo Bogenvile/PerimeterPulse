@@ -7,16 +7,6 @@ import (
 	"time"
 )
 
-type GeoIPResponse struct {
-	Lat         float64 `json:"lat"`
-	Lon         float64 `json:"lon"`
-	City        string  `json:"city"`
-	Country     string  `json:"country"`
-	CountryCode string  `json:"countryCode"`
-	ISP         string  `json:"isp"`
-}
-
-// LocationData holds geographic location info with metadata
 type LocationData struct {
 	Latitude       float64 `json:"latitude"`
 	Longitude      float64 `json:"longitude"`
@@ -27,31 +17,27 @@ type LocationData struct {
 	Timestamp      string  `json:"timestamp"`
 }
 
-// CollectLocation tries OS-specific → GeoIP fallback
+type GeoIPResponse struct {
+	Lat         float64 `json:"lat"`
+	Lon         float64 `json:"lon"`
+	City        string  `json:"city"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"countryCode"`
+	ISP         string  `json:"isp"`
+}
+
 func CollectLocation() LocationData {
-	loc := getOSLocation()
-	if loc.Latitude != 0 && loc.Longitude != 0 {
-		return loc
-	}
-	return geoIPFallback()
-}
-
-func getOSLocation() LocationData {
-	return LocationData{}
-}
-
-func geoIPFallback() LocationData {
 	client := http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get("http://ip-api.com/json?fields=lat,lon,city,country,countryCode,isp")
 	if err != nil {
-		fmt.Printf("[location] GeoIP fallback failed: %v\n", err)
+		fmt.Printf("[location] GeoIP gagal: %v\n", err)
 		return LocationData{}
 	}
 	defer resp.Body.Close()
 
 	var geo GeoIPResponse
 	if err := json.NewDecoder(resp.Body).Decode(&geo); err != nil {
-		fmt.Printf("[location] GeoIP decode error: %v\n", err)
+		fmt.Printf("[location] Decode error: %v\n", err)
 		return LocationData{}
 	}
 

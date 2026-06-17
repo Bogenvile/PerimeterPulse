@@ -1,3 +1,6 @@
+//go:build windows
+
 package collector
 
-// Windows-specific location is not implemented yet – fallback to GeoIP in location.go
+// getOSLocation di Windows dikosongkan dulu, nanti bisa ditambahin.
+// CollectLocation di location.go akan langsung pake GeoIP.
