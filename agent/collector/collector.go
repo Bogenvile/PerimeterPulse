@@ -3,9 +3,7 @@ package collector
 import (
 	"crypto/sha256"
 	"fmt"
-	"log"
 	"math"
-	"os"
 	"runtime"
 	"strings"
 	"time"

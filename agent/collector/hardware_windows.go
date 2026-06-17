@@ -3,6 +3,7 @@
 package collector
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 )
