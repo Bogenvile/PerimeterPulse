@@ -44,13 +44,8 @@ func main() {
 
 	apiClient := client.NewClient(*serverURL, *apiKey)
 
-	log.Println("Registering agent with server...")
-	if err := client.Register(apiClient, sysInfo, osName, osVersion, version); err != nil {
-		log.Printf("Warning: Registration failed: %v (will retry on first heartbeat)\n", err)
-	}
-
 	intervalDuration := time.Duration(*interval) * time.Second
-	log.Printf("Heartbeat interval: %s. Agent running.\n", intervalDuration)
+	log.Printf("Heartbeat interval: %s. Agent running. (Registration will happen on first heartbeat)\n", intervalDuration)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
