@@ -3,8 +3,6 @@ package collector
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
-	"net"
 	"runtime"
 	"strings"
 	"time"
@@ -99,6 +97,39 @@ type OSInfo struct {
 	OSVersion string `json:"os_version"`
 }
 
+// isActiveInterface filters out loopback and inactive interfaces
+func isActiveInterface(iface gopsnet.InterfaceStat) bool {
+	name := strings.ToLower(iface.Name)
+	if strings.HasPrefix(name, "lo") || strings.Contains(name, "loopback") {
+		return false
+	}
+	if iface.HardwareAddr == "" {
+		return false
+	}
+	// Check if interface has any IP addresses
+	hasIP := false
+	for _, addr := range iface.Addrs {
+		ip := strings.Split(addr.Addr, "/")[0]
+		if ip != "" && !strings.HasPrefix(ip, "127.") && !strings.HasPrefix(ip, "::1") {
+			hasIP = true
+			break
+		}
+	}
+	return hasIP
+}
+
+// getInterfaceIPs returns non-loopback IPs from an interface
+func getInterfaceIPs(iface gopsnet.InterfaceStat) []string {
+	var ips []string
+	for _, addr := range iface.Addrs {
+		ip := strings.Split(addr.Addr, "/")[0]
+		if ip != "" && !strings.HasPrefix(ip, "127.") && !strings.HasPrefix(ip, "::1") {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
+}
+
 // CollectSystemInfo collects static system information
 func CollectSystemInfo() SystemInfo {
 	info := SystemInfo{}
@@ -135,18 +166,11 @@ func CollectSystemInfo() SystemInfo {
 	interfaces, err := gopsnet.Interfaces()
 	if err == nil {
 		for _, iface := range interfaces {
-			if iface.Flags&gopsnet.InterfaceFlagUp == 0 || iface.Flags&gopsnet.InterfaceFlagLoopback != 0 {
+			if !isActiveInterface(iface) {
 				continue
 			}
-			if iface.HardwareAddr != "" {
-				info.MACAddresses = append(info.MACAddresses, iface.HardwareAddr)
-			}
-			for _, addr := range iface.Addrs {
-				ipStr := strings.Split(addr.Addr, "/")[0]
-				if ipStr != "" && !strings.HasPrefix(ipStr, "127.") && !strings.HasPrefix(ipStr, "::1") {
-					info.IPAddresses = append(info.IPAddresses, ipStr)
-				}
-			}
+			info.MACAddresses = append(info.MACAddresses, iface.HardwareAddr)
+			info.IPAddresses = append(info.IPAddresses, getInterfaceIPs(iface)...)
 		}
 	}
 
@@ -223,15 +247,10 @@ func CollectNetworkInfo() NetworkInfo {
 	interfaces, err := gopsnet.Interfaces()
 	if err == nil {
 		for _, iface := range interfaces {
-			if iface.Flags&gopsnet.InterfaceFlagUp == 0 || iface.Flags&gopsnet.InterfaceFlagLoopback != 0 {
+			if !isActiveInterface(iface) {
 				continue
 			}
-			for _, addr := range iface.Addrs {
-				ipStr := strings.Split(addr.Addr, "/")[0]
-				if ipStr != "" && !strings.HasPrefix(ipStr, "127.") && !strings.HasPrefix(ipStr, "::1") {
-					info.IPAddresses = append(info.IPAddresses, ipStr)
-				}
-			}
+			info.IPAddresses = append(info.IPAddresses, getInterfaceIPs(iface)...)
 		}
 	}
 
@@ -253,11 +272,6 @@ func determineDiskModel() (model string, diskType string) {
 	}
 
 	for _, part := range partitions {
-		usage, err := disk.Usage(part.Mountpoint)
-		if err != nil {
-			continue
-		}
-		_ = usage
 		device := part.Device
 		if runtime.GOOS == "windows" {
 			model = device
