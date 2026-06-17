@@ -2,12 +2,4 @@
 
 package collector
 
-func collectLinuxHardware() SystemInfo {
-	return SystemInfo{
-		Hostname:         "unknown",
-	}
-}
-
-func collectLinuxOSVersion() string {
-	return ""
-}
+// GetHardwareInfo stub untuk non-Linux.
