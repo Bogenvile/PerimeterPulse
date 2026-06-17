@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -186,7 +187,6 @@ func getWindowsNetworkSpeed() float64 {
 		return 0
 	}
 	speed := strings.TrimSpace(string(out))
-	// LinkSpeed is typically like "1 Gbps" or "100 Mbps"
 	speed = strings.Replace(speed, " Gbps", "000", 1)
 	speed = strings.Replace(speed, " Mbps", "", 1)
 	var mbps float64

@@ -3,7 +3,6 @@ package collector
 import (
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -11,14 +10,12 @@ import (
 
 // CollectSystemInfo gathers base system info using platform-specific collectHardwareInfo
 func CollectSystemInfo() SystemInfo {
-	info := collectHardwareInfo() // from hardware_windows.go or hardware_linux.go
-	return info
+	return collectHardwareInfo() // from hardware_windows.go or hardware_linux.go
 }
 
 // GetOSInfo returns OS and version
 func GetOSInfo() OSInfo {
-	info := collectOSInfo() // from os-specific files
-	return info
+	return collectOSInfo()
 }
 
 // GenerateAgentID creates a deterministic agent ID from hostname + MACs
@@ -46,7 +43,6 @@ func CollectLocation() *LocationData {
 	return collectLocation()
 }
 
-// Stub for OS info collection
 func collectOSInfo() OSInfo {
 	return OSInfo{
 		OS:        runtime.GOOS,
@@ -55,7 +51,6 @@ func collectOSInfo() OSInfo {
 }
 
 func getOSVersion() string {
-	// Platform-specific files override this
 	if v := getWindowsOSVersion(); v != "" {
 		return v
 	}
