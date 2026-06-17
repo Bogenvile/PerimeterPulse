@@ -13,14 +13,16 @@ import (
 type Client struct {
 	serverURL string
 	apiKey    string
+	hostname  string
 	http      *http.Client
 }
 
-// NewClient creates a new API client.
-func NewClient(serverURL, apiKey string) *Client {
+// NewClient creates a new API client. hostname is sent with every heartbeat.
+func NewClient(serverURL, apiKey, hostname string) *Client {
 	return &Client{
 		serverURL: serverURL,
 		apiKey:    apiKey,
+		hostname:  hostname,
 		http: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -29,12 +31,12 @@ func NewClient(serverURL, apiKey string) *Client {
 
 // HeartbeatPayload is the JSON body sent to /api/agent/heartbeat.
 type HeartbeatPayload struct {
-	AgentID     string        `json:"agent_id"`
-	APIKey      string        `json:"api_key"`
-	Hostname    string        `json:"hostname,omitempty"`
-	Metrics     any           `json:"metrics"`
-	Location    any           `json:"location"`
-	NetworkInfo any           `json:"network_info"`
+	AgentID     string `json:"agent_id"`
+	APIKey      string `json:"api_key"`
+	Hostname    string `json:"hostname,omitempty"`
+	Metrics     any    `json:"metrics"`
+	Location    any    `json:"location"`
+	NetworkInfo any    `json:"network_info"`
 }
 
 // SendHeartbeat sends metrics, network, and location data to the server.
@@ -42,6 +44,7 @@ func (c *Client) SendHeartbeat(agentID string, metrics, network, location any) e
 	payload := HeartbeatPayload{
 		AgentID:     agentID,
 		APIKey:      c.apiKey,
+		Hostname:    c.hostname,
 		Metrics:     metrics,
 		NetworkInfo: network,
 		Location:    location,

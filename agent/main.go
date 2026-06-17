@@ -19,7 +19,7 @@ func main() {
 	serverURL := flag.String("server", "", "PerimeterPulse server URL (required)")
 	apiKey := flag.String("apikey", "", "API key for agent authentication (required)")
 	hostnameOverride := flag.String("hostname", "", "Override auto-detected hostname")
-	interval := flag.Int("interval",3, "Heartbeat interval in seconds")
+	interval := flag.Int("interval", 60, "Heartbeat interval in seconds")
 
 	flag.Parse()
 
@@ -36,16 +36,15 @@ func main() {
 	}
 
 	osName, osVersion := collector.GetOSInfo()
-
 	agentID := collector.GenerateAgentID(sysInfo.Hostname, sysInfo.MacAddresses)
 
 	log.Printf("Agent ID: %s | Hostname: %s | OS: %s %s\n",
 		agentID, sysInfo.Hostname, osName, osVersion)
 
-	apiClient := client.NewClient(*serverURL, *apiKey)
+	apiClient := client.NewClient(*serverURL, *apiKey, sysInfo.Hostname)
 
 	intervalDuration := time.Duration(*interval) * time.Second
-	log.Printf("Heartbeat interval: %s. Agent running. (Registration will happen on first heartbeat)\n", intervalDuration)
+	log.Printf("Heartbeat interval: %s. Agent running.\n", intervalDuration)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
