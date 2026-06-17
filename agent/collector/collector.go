@@ -1,37 +1,25 @@
 package collector
 
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"runtime"
-	"strings"
-	"time"
-
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/mem"
-	gopsnet "github.com/shirou/gopsutil/v3/net"
-)
-
-// SystemInfo holds static system information
+// SystemInfo contains basic system information collected from the host
 type SystemInfo struct {
-	Hostname          string
-	MACAddresses      []string
-	IPAddresses       []string
-	CPUModel          string
-	CPUCores          int
-	RAMTotalBytes     uint64
-	StorageTotalBytes uint64
-	DiskModel         string
-	DiskType          string
-	WiFiSSID          string
-	WiFiSignalDBM     int
-	NetworkSpeedMbps  uint64
+	Hostname         string   `json:"hostname"`
+	MACAddresses     []string `json:"mac_addresses"`
+	IPAddresses      []string `json:"ip_addresses"`
+	CPUModel         string   `json:"cpu_model"`
+	CPUCores         int      `json:"cpu_cores"`
+	RAMTotalBytes    int64    `json:"ram_total_bytes"`
+	StorageTotalBytes int64   `json:"storage_total_bytes"`
+	DiskModel        string   `json:"disk_model"`
+	DiskType         string   `json:"disk_type"`
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64  `json:"network_speed_mbps"`
 }
 
-// RegistrationPayload is sent to the server on first connection
+// RegistrationPayload is sent during agent registration
 type RegistrationPayload struct {
+	ApiKey            string   `json:"api_key"`
+	AgentID           string   `json:"agent_id"`
 	Hostname          string   `json:"hostname"`
 	OS                string   `json:"os"`
 	OSVersion         string   `json:"os_version"`
@@ -40,278 +28,44 @@ type RegistrationPayload struct {
 	IPAddresses       []string `json:"ip_addresses"`
 	CPUModel          string   `json:"cpu_model"`
 	CPUCores          int      `json:"cpu_cores"`
-	RAMTotalBytes     uint64   `json:"ram_total_bytes"`
-	StorageTotalBytes uint64   `json:"storage_total_bytes"`
+	RAMTotalBytes     int64    `json:"ram_total_bytes"`
+	StorageTotalBytes int64    `json:"storage_total_bytes"`
 	DiskModel         string   `json:"disk_model"`
 	DiskType          string   `json:"disk_type"`
 	WiFiSSID          string   `json:"wifi_ssid"`
 	WiFiSignalDBM     int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps  uint64   `json:"network_speed_mbps"`
+	NetworkSpeedMbps  float64  `json:"network_speed_mbps"`
 }
 
-// MetricsData holds real-time metrics
-type MetricsData struct {
-	CPUPercent        float64         `json:"cpu_percent"`
-	RAMPercent        float64         `json:"ram_percent"`
-	RAMUsedBytes      uint64          `json:"ram_used_bytes"`
-	RAMTotalBytes     uint64          `json:"ram_total_bytes"`
-	StoragePercent    float64         `json:"storage_percent"`
-	StorageUsedBytes  uint64          `json:"storage_used_bytes"`
-	StorageTotalBytes uint64          `json:"storage_total_bytes"`
-	UptimeSeconds     uint64          `json:"uptime_seconds"`
-	NetworkStatus     string          `json:"network_status"`
-	NetworkLatencyMs  float64         `json:"network_latency_ms"`
-	PingLatencyMs     float64         `json:"ping_latency_ms,omitempty"`
-	ErrorCount        int             `json:"error_count,omitempty"`
-	DiskHealthStatus  string          `json:"disk_health_status,omitempty"`
-	DiskTemperatureC  float64         `json:"disk_temperature_c,omitempty"`
-	GatewayReachable  bool            `json:"gateway_reachable,omitempty"`
-	DNSWorking        bool            `json:"dns_working,omitempty"`
-	InternetReachable bool            `json:"internet_reachable,omitempty"`
-	DefaultGateway    string          `json:"default_gateway,omitempty"`
-	Timestamp         string          `json:"timestamp"`
-	ErrorLogs         []ErrorLogEntry `json:"error_logs,omitempty"`
-}
-
-type ErrorLogEntry struct {
-	Time    string `json:"time"`
-	ID      int    `json:"id"`
-	Level   string `json:"level"`
-	Source  string `json:"source"`
-	Message string `json:"message"`
-}
-
-// NetworkInfo holds network information
-type NetworkInfo struct {
-	WiFiSSID         string   `json:"wifi_ssid"`
-	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
-	NetworkSpeedMbps uint64   `json:"network_speed_mbps"`
-	IPAddresses      []string `json:"ip_addresses"`
-	WiFiIP           string   `json:"wifi_ip,omitempty"`
-	GatewayIP        string   `json:"gateway_ip,omitempty"`
-}
-
-// OSInfo holds OS information
+// OSInfo contains OS-specific identification
 type OSInfo struct {
 	OS        string `json:"os"`
 	OSVersion string `json:"os_version"`
 }
 
-// isActiveInterface filters out loopback and inactive interfaces
-func isActiveInterface(iface gopsnet.InterfaceStat) bool {
-	name := strings.ToLower(iface.Name)
-	if strings.HasPrefix(name, "lo") || strings.Contains(name, "loopback") {
-		return false
-	}
-	if iface.HardwareAddr == "" {
-		return false
-	}
-	// Check if interface has any IP addresses
-	hasIP := false
-	for _, addr := range iface.Addrs {
-		ip := strings.Split(addr.Addr, "/")[0]
-		if ip != "" && !strings.HasPrefix(ip, "127.") && !strings.HasPrefix(ip, "::1") {
-			hasIP = true
-			break
-		}
-	}
-	return hasIP
+// MetricsData holds system performance metrics
+type MetricsData struct {
+	CPUPercent        float64 `json:"cpu_percent"`
+	RAMPercent        float64 `json:"ram_percent"`
+	RAMUsedBytes      int64   `json:"ram_used_bytes"`
+	RAMTotalBytes     int64   `json:"ram_total_bytes"`
+	StoragePercent    float64 `json:"storage_percent"`
+	StorageUsedBytes  int64   `json:"storage_used_bytes"`
+	StorageTotalBytes int64   `json:"storage_total_bytes"`
+	UptimeSeconds     int64   `json:"uptime_seconds"`
+	NetworkStatus     string  `json:"network_status"`
+	NetworkLatencyMS  float64 `json:"network_latency_ms"`
+	DiskHealthStatus  string  `json:"disk_health_status"`
+	DiskTemperatureC  float64 `json:"disk_temperature_c"`
+	Timestamp         string  `json:"timestamp"`
 }
 
-// getInterfaceIPs returns non-loopback IPs from an interface
-func getInterfaceIPs(iface gopsnet.InterfaceStat) []string {
-	var ips []string
-	for _, addr := range iface.Addrs {
-		ip := strings.Split(addr.Addr, "/")[0]
-		if ip != "" && !strings.HasPrefix(ip, "127.") && !strings.HasPrefix(ip, "::1") {
-			ips = append(ips, ip)
-		}
-	}
-	return ips
-}
-
-// CollectSystemInfo collects static system information
-func CollectSystemInfo() SystemInfo {
-	info := SystemInfo{}
-
-	// CPU Info
-	cpuInfo, err := cpu.Info()
-	if err == nil && len(cpuInfo) > 0 {
-		info.CPUModel = cpuInfo[0].ModelName
-		info.CPUCores = len(cpuInfo)
-	}
-
-	// Memory
-	memInfo, err := mem.VirtualMemory()
-	if err == nil {
-		info.RAMTotalBytes = memInfo.Total
-	}
-
-	// Storage
-	partitions, err := disk.Partitions(false)
-	if err == nil {
-		for _, part := range partitions {
-			usage, err := disk.Usage(part.Mountpoint)
-			if err == nil {
-				info.StorageTotalBytes = usage.Total
-				break
-			}
-		}
-	}
-
-	// Disk model & type
-	info.DiskModel, info.DiskType = determineDiskModel()
-
-	// Network interfaces
-	interfaces, err := gopsnet.Interfaces()
-	if err == nil {
-		for _, iface := range interfaces {
-			if !isActiveInterface(iface) {
-				continue
-			}
-			info.MACAddresses = append(info.MACAddresses, iface.HardwareAddr)
-			info.IPAddresses = append(info.IPAddresses, getInterfaceIPs(iface)...)
-		}
-	}
-
-	// WiFi info (platform-specific)
-	info.WiFiSSID = getWiFiSSID()
-	info.WiFiSignalDBM = getWiFiSignalDBM()
-
-	return info
-}
-
-// CollectMetrics collects real-time system metrics
-func CollectMetrics() MetricsData {
-	m := MetricsData{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	// CPU
-	cpuPercent, err := cpu.Percent(0, false)
-	if err == nil && len(cpuPercent) > 0 {
-		m.CPUPercent = cpuPercent[0]
-	}
-
-	// Memory
-	memInfo, err := mem.VirtualMemory()
-	if err == nil {
-		m.RAMPercent = memInfo.UsedPercent
-		m.RAMUsedBytes = memInfo.Used
-		m.RAMTotalBytes = memInfo.Total
-	}
-
-	// Storage
-	partitions, err := disk.Partitions(false)
-	if err == nil {
-		for _, part := range partitions {
-			usage, err := disk.Usage(part.Mountpoint)
-			if err == nil {
-				m.StoragePercent = usage.UsedPercent
-				m.StorageUsedBytes = usage.Used
-				m.StorageTotalBytes = usage.Total
-				break
-			}
-		}
-	}
-
-	// Uptime
-	hostInfo, err := host.Info()
-	if err == nil {
-		m.UptimeSeconds = hostInfo.Uptime
-	}
-
-	// Network diagnostics
-	diag := RunNetworkDiag()
-	m.NetworkStatus = diag.Status
-	m.NetworkLatencyMs = diag.LatencyMs
-	m.GatewayReachable = diag.GatewayReachable
-	m.DNSWorking = diag.DNSWorking
-	m.InternetReachable = diag.InternetReachable
-	m.DefaultGateway = diag.DefaultGateway
-
-	// Ping latency
-	pingMs, err := PingGoogle()
-	if err == nil {
-		m.PingLatencyMs = pingMs
-	}
-
-	return m
-}
-
-// CollectNetworkInfo collects network information
-func CollectNetworkInfo() NetworkInfo {
-	info := NetworkInfo{}
-
-	// Get IP addresses from active interfaces
-	interfaces, err := gopsnet.Interfaces()
-	if err == nil {
-		for _, iface := range interfaces {
-			if !isActiveInterface(iface) {
-				continue
-			}
-			info.IPAddresses = append(info.IPAddresses, getInterfaceIPs(iface)...)
-		}
-	}
-
-	// WiFi info (platform-specific)
-	info.WiFiSSID = getWiFiSSID()
-	info.WiFiSignalDBM = getWiFiSignalDBM()
-	info.NetworkSpeedMbps = getNetworkSpeedMbps()
-	info.WiFiIP = getWiFiIP()
-	info.GatewayIP = getDefaultGatewayIP()
-
-	return info
-}
-
-// determineDiskModel determines disk model and type
-func determineDiskModel() (model string, diskType string) {
-	partitions, err := disk.Partitions(false)
-	if err != nil {
-		return "Unknown", "unknown"
-	}
-
-	for _, part := range partitions {
-		device := part.Device
-		if runtime.GOOS == "windows" {
-			model = device
-			diskType = "SSD"
-		} else {
-			model = device
-			if strings.Contains(device, "nvme") {
-				diskType = "NVMe"
-			} else if strings.Contains(device, "sd") {
-				diskType = "SSD"
-			} else if strings.Contains(device, "hd") {
-				diskType = "HDD"
-			} else {
-				diskType = "unknown"
-			}
-		}
-		break
-	}
-	return
-}
-
-// GetOSInfo returns OS information
-func GetOSInfo() OSInfo {
-	return OSInfo{
-		OS:        runtime.GOOS,
-		OSVersion: getOSVersion(),
-	}
-}
-
-func getOSVersion() string {
-	hostInfo, err := host.Info()
-	if err != nil {
-		return "unknown"
-	}
-	return hostInfo.PlatformVersion
-}
-
-// GenerateAgentID generates a stable agent ID from system info
-func GenerateAgentID(info SystemInfo) string {
-	data := info.Hostname + strings.Join(info.MACAddresses, ",")
-	hash := sha256.Sum256([]byte(data))
-	return "agent-" + hex.EncodeToString(hash[:8])
+// NetworkInfo holds network-related information
+type NetworkInfo struct {
+	WiFiSSID        string   `json:"wifi_ssid"`
+	WiFiSignalDBM   int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64 `json:"network_speed_mbps"`
+	IPAddresses     []string `json:"ip_addresses"`
+	WifiIP          string   `json:"wifi_ip,omitempty"`
+	GatewayIP       string   `json:"gateway_ip,omitempty"`
 }

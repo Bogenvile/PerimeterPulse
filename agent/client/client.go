@@ -21,6 +21,8 @@ type Client struct {
 
 // HeartbeatPayload contains data sent in a heartbeat
 type HeartbeatPayload struct {
+	AgentID     string                  `json:"agent_id"`
+	ApiKey      string                  `json:"api_key"`
 	Metrics     collector.MetricsData   `json:"metrics"`
 	NetworkInfo collector.NetworkInfo   `json:"network_info"`
 	Location    *collector.LocationData `json:"location,omitempty"`
@@ -41,6 +43,8 @@ func NewClient(serverURL, apiKey, agentID string) *Client {
 // Register sends registration data to the server
 func (c *Client) Register(info collector.SystemInfo, osInfo collector.OSInfo, version string) error {
 	payload := collector.RegistrationPayload{
+		ApiKey:            c.apiKey,
+		AgentID:           c.agentID,
 		Hostname:          info.Hostname,
 		OS:                osInfo.OS,
 		OSVersion:         osInfo.OSVersion,
@@ -61,7 +65,14 @@ func (c *Client) Register(info collector.SystemInfo, osInfo collector.OSInfo, ve
 }
 
 // SendHeartbeat sends a heartbeat to the server
-func (c *Client) SendHeartbeat(payload HeartbeatPayload) error {
+func (c *Client) SendHeartbeat(m collector.MetricsData, n collector.NetworkInfo, loc *collector.LocationData) error {
+	payload := HeartbeatPayload{
+		AgentID:     c.agentID,
+		ApiKey:      c.apiKey,
+		Metrics:     m,
+		NetworkInfo: n,
+		Location:    loc,
+	}
 	return c.post("/api/agent/heartbeat", payload)
 }
 
@@ -78,7 +89,6 @@ func (c *Client) post(path string, payload interface{}) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
