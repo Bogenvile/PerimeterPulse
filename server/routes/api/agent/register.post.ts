@@ -135,9 +135,9 @@ export default defineHandler(async (event) => {
         );
       } else {
         // Brand new asset
-        // If hostname is a placeholder, use a slightly better fallback
+        // If hostname is a placeholder, use a clear auto-generated name
         const finalHostname = hostnameIsPlaceholder
-          ? `PC-${agentId.replace(/^agent-/, "").slice(0, 8)}`
+          ? `Host-${agentId.replace(/^agent-/, "").slice(0, 8)}`
           : rawHostname;
 
         console.log(`[register] Creating new asset: "${finalHostname}" (${agentId})`);
@@ -147,7 +147,7 @@ export default defineHandler(async (event) => {
              mac_addresses, ip_addresses, cpu_model, cpu_cores,
              ram_total_bytes, storage_total_bytes,
              disk_model, disk_type, wifi_ssid, wifi_signal_dbm, network_speed_mbps, status)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'offline')`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'offline')`,
           [
             agentId, finalHostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
             macsJson, ipsJson, body.cpu_model || "", body.cpu_cores || 0,
