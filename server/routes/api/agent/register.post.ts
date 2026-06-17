@@ -15,14 +15,13 @@ interface RegisterBody {
 
 /**
  * Check if a hostname looks like an auto-generated placeholder.
- * We only flag names that WE generate (Host-xxxx) or obvious garbage.
+ * Only our own "Host-xxxx" pattern is treated as placeholder.
  * Real Windows hostnames like PC-xxxx, DESKTOP-xxxx, LAPTOP-xxxx are NOT placeholders.
  */
 function isPlaceholderHostname(hn: string): boolean {
   if (!hn) return true;
   const trimmed = hn.trim();
   if (!trimmed) return true;
-  // Only "Host-" prefix is our own auto-generated fallback
   if (/^Host-[a-f0-9]{6,12}$/i.test(trimmed)) return true;
   return false;
 }
@@ -145,13 +144,15 @@ export default defineHandler(async (event) => {
           : rawHostname;
 
         console.log(`[register] Creating new asset: "${finalHostname}" (${agentId})`);
+
+        // 17 columns: agent_id..network_speed_mbps + status (16 params + 'offline' = 17 values)
         await query(
           `INSERT INTO assets
             (agent_id, hostname, os, os_version, agent_version,
              mac_addresses, ip_addresses, cpu_model, cpu_cores,
              ram_total_bytes, storage_total_bytes,
              disk_model, disk_type, wifi_ssid, wifi_signal_dbm, network_speed_mbps, status)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'offline')`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'offline')`,
           [
             agentId, finalHostname, body.os, body.os_version || "", body.agent_version || "1.0.0",
             macsJson, ipsJson, body.cpu_model || "", body.cpu_cores || 0,
