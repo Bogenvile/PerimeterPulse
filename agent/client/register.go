@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"pulse-agent/collector"
+	"perimeterpulse-agent/collector"
 )
 
 func (c *ApiClient) Register(payload collector.RegistrationPayload) error {

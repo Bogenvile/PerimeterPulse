@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"pulse-agent/buffer"
-	"pulse-agent/client"
-	"pulse-agent/collector"
-	"pulse-agent/commands"
+	"perimeterpulse-agent/buffer"
+	"perimeterpulse-agent/client"
+	"perimeterpulse-agent/collector"
+	"perimeterpulse-agent/commands"
 )
 
 var (
@@ -134,18 +134,15 @@ func sendHeartbeat(api *client.ApiClient, hostname string, buf *buffer.Buffer) {
 
 	// Collect network info
 	networkInfo := collector.CollectNetworkInfo()
+	log.Printf("[network] IPs=%v WiFi=%s Signal=%d GW=%s",
+		networkInfo.IPAddresses, networkInfo.WiFiSSID, networkInfo.WiFiSignalDBM, networkInfo.GatewayIP)
 
 	// Fetch pending commands
 	cmds, _ := api.FetchCommands()
 	for _, cmd := range cmds {
 		log.Printf("[commands] Executing #%d: %s", cmd.ID, cmd.Command)
 		execResult := commands.Execute(cmd.Command)
-		status := "completed"
-		if execResult.Error != "" {
-			status = "failed"
-		}
 		api.ReportCommandResult(cmd.ID, "complete", execResult.Output, execResult.Error, execResult.ExitCode)
-		_ = status
 	}
 
 	// Send heartbeat
