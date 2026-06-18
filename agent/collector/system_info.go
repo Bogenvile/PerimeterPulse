@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -54,5 +55,3 @@ func fnvHash(s string) string {
 	}
 	return fmt.Sprintf("%08x", h)
 }
-
-import "fmt"
