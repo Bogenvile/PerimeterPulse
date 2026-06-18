@@ -211,7 +211,7 @@ func detectDiskHealthPercent() float64 {
 
 func collectProcessList() []ProcessInfo {
 	out, err := exec.Command("powershell", "-NoProfile", "-Command",
-		"Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 | ForEach-Object { Write-Output \"$($_.Name)|$($_.Id)|$($_.CPU)|$([math]::Round($_.WorkingSet64/1MB,1))\" }").Output()
+		"Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 | ForEach-Object { $n=if($_.MainWindowTitle){$_.MainWindowTitle}else{$_.Name}; Write-Output \"$n|$($_.Id)|$($_.CPU)|$([math]::Round($_.WorkingSet64/1MB,1))\" }").Output()
 	if err != nil {
 		return nil
 	}
