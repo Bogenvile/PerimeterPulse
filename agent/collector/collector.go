@@ -1,203 +1,90 @@
 package collector
 
 import (
-	"encoding/json"
-	"fmt"
-	"net"
-	"os"
-	"runtime"
 	"time"
-
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/mem"
-	netutil "github.com/shirou/gopsutil/v3/net"
 )
 
-// CollectMetrics returns a fully populated MetricsPayload.
-func CollectMetrics(agentID string) MetricsPayload {
-	// CPU
-	cpuPercent := 0.0
-	if c, err := cpu.Percent(time.Second, false); err == nil && len(c) > 0 {
-		cpuPercent = c[0]
-	}
-	cpuCores := 0
-	if c, err := cpu.Counts(true); err == nil {
-		cpuCores = c
-	}
-	cpuModel := "Unknown"
-	if ci, err := cpu.Info(); err == nil && len(ci) > 0 {
-		cpuModel = ci[0].ModelName
-	}
+// -------------------------------
+// Common types used across collectors
+// -------------------------------
 
-	// RAM
-	ramPercent := 0.0
-	ramTotal := uint64(0)
-	ramUsed := uint64(0)
-	if v, err := mem.VirtualMemory(); err == nil {
-		ramPercent = v.UsedPercent
-		ramTotal = v.Total
-		ramUsed = v.Used
-	}
-
-	// Storage (use root partition on Linux, C: on Windows)
-	storagePercent := 0.0
-	storageTotal := uint64(0)
-	storageUsed := uint64(0)
-	storagePath := "/"
-	if runtime.GOOS == "windows" {
-		storagePath = "C:"
-	}
-	if d, err := disk.Usage(storagePath); err == nil {
-		storagePercent = d.UsedPercent
-		storageTotal = d.Total
-		storageUsed = d.Used
-	}
-
-	// Uptime
-	uptimeSeconds := uint64(0)
-	if u, err := host.Uptime(); err == nil {
-		uptimeSeconds = uint64(u)
-	}
-
-	// Disk type/model from partition (fallback)
-	diskType := "unknown"
-	diskModel := ""
-	diskHealth := "ok"
-	diskTemp := float64(0)
-
-	if parts, err := disk.Partitions(false); err == nil {
-		for _, p := range parts {
-			if p.Mountpoint == storagePath || (runtime.GOOS == "windows" && p.Mountpoint == "C:") {
-				if d, err2 := disk.Usage(p.Mountpoint); err2 == nil {
-					if d.Fstype != "" {
-						diskType = d.Fstype
-					}
-				}
-				// Model name (unreliable, but we try)
-				if dev := p.Device; dev != "" {
-					diskModel = dev
-				}
-				break
-			}
-		}
-	}
-
-	// Network diagnostics: run the diag functions separately
-	gatewayReachable, dnsWorking, internetReachable, defaultGateway := runNetworkDiagnostics()
-
-	payload := MetricsPayload{
-		CPUPerecent:      cpuPercent,
-		RAMPerecent:      ramPercent,
-		RAMUsedBytes:     ramUsed,
-		RAMTotalBytes:    ramTotal,
-		StoragePercent:   storagePercent,
-		StorageUsedBytes: storageUsed,
-		StorageTotalBytes: storageTotal,
-		UptimeSeconds:    uptimeSeconds,
-		NetworkStatus:    "up", // will be updated later
-		CPUModel:         cpuModel,
-		CPUCores:         cpuCores,
-		DiskModel:        diskModel,
-		DiskType:         diskType,
-		DiskHealthStatus: diskHealth,
-		DiskTemperatureC: diskTemp,
-		GatewayReachable: gatewayReachable,
-		DNSWorking:       dnsWorking,
-		InternetReachable: internetReachable,
-		DefaultGateway:   defaultGateway,
-		ErrorCount:       0,
-		Timestamp:        time.Now().UTC().Format(time.RFC3339),
-	}
-
-	return payload
+type SystemInfo struct {
+	Hostname     string   `json:"hostname"`
+	MacAddresses []string `json:"mac_addresses"`
 }
 
-// CollectNetworkInfo returns network-related data using gopsutil.
-func CollectNetworkInfo() NetworkPayload {
-	interfaces, _ := net.Interfaces()
-	var wifiSSID string
-	wifiSignal := float64(0)
-	speedMbps := float64(0)
-	var ips []string
-	wifiIP := ""
-	gatewayIP := ""
-
-	// Try to get active WiFi connection details on Windows via WMI? Not trivial.
-	// We'll fill minimal info.
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip := ipNet.IP.String()
-			if ip == "::1" || ip == "127.0.0.1" {
-				continue
-			}
-			ips = append(ips, ip)
-			if wifiIP == "" && ip != "" {
-				wifiIP = ip
-			}
-		}
-	}
-
-	// Collect MAC addresses again (already in system info)
-	var macs []string
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		hw := iface.HardwareAddr.String()
-		if hw != "" {
-			macs = append(macs, hw)
-		}
-	}
-
-	return NetworkPayload{
-		WiFiSSID:        wifiSSID,
-		WiFiSignalDBm:   wifiSignal,
-		NetworkSpeedMbps: speedMbps,
-		IPAddresses:     ips,
-		WiFiIP:          wifiIP,
-		GatewayIP:       gatewayIP,
-		MacAddresses:    macs,
-	}
+type HardwareInfo struct {
+	CPUModel          string `json:"cpu_model"`
+	CPUCores          int    `json:"cpu_cores"`
+	RAMTotalBytes     uint64 `json:"ram_total_bytes"`
+	StorageTotalBytes uint64 `json:"storage_total_bytes"`
+	DiskModel         string `json:"disk_model"`
+	DiskType          string `json:"disk_type"`
 }
 
-// CollectLocation returns a placeholder location (to be filled by dedicated location file).
-func CollectLocation() LocationPayload {
-	// The actual location is handled in location.go / location_windows.go
-	// Return a stub with zeros. The main.go will call the real location collector.
-	return LocationPayload{}
+type NetworkInfo struct {
+	WiFiSSID         string   `json:"wifi_ssid"`
+	WiFiSignalDBM    int      `json:"wifi_signal_dbm"`
+	NetworkSpeedMbps float64  `json:"network_speed_mbps"`
+	IPAddresses      []string `json:"ip_addresses"`
+	WiFiIP           string   `json:"wifi_ip"`
+	GatewayIP        string   `json:"gateway_ip"`
 }
 
-// runNetworkDiagnostics is a simple implementation from the old diag.go
-func runNetworkDiagnostics() (gatewayReachable bool, dnsWorking bool, internetReachable bool, defaultGateway string) {
-	// Try to resolve google.com
-	_, err := net.LookupHost("google.com")
-	dnsWorking = err == nil
+type LocationInfo struct {
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	AccuracyMeters float64 `json:"accuracy_meters"`
+	Source         string  `json:"source"`
+	City           string  `json:"city"`
+	Country        string  `json:"country"`
+	Timestamp      string  `json:"timestamp"`
+}
 
-	// Try TCP connection to 8.8.8.8:53
-	conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 2*time.Second)
-	internetReachable = err == nil
-	if conn != nil {
-		conn.Close()
+type Metrics struct {
+	Timestamp         time.Time `json:"timestamp"`
+	CPUPercent        float64   `json:"cpu_percent"`
+	RAMPercent        float64   `json:"ram_percent"`
+	RAMUsedBytes      uint64    `json:"ram_used_bytes"`
+	RAMTotalBytes     uint64    `json:"ram_total_bytes"`
+	StoragePercent    float64   `json:"storage_percent"`
+	StorageUsedBytes  uint64    `json:"storage_used_bytes"`
+	StorageTotalBytes uint64    `json:"storage_total_bytes"`
+	UptimeSeconds     uint64    `json:"uptime_seconds"`
+	NetworkStatus     string    `json:"network_status"`
+	NetworkLatencyMs  float64   `json:"network_latency_ms"`
+	PingLatencyMs     float64   `json:"ping_latency_ms"`
+	ErrorCount        int       `json:"error_count"`
+	DiskHealthStatus  string    `json:"disk_health_status"`
+	DiskTemperatureC  float64   `json:"disk_temperature_c"`
+	GatewayReachable  bool      `json:"gateway_reachable"`
+	DNSWorking        bool      `json:"dns_working"`
+	InternetReachable bool      `json:"internet_reachable"`
+	DefaultGateway    string    `json:"default_gateway"`
+}
+
+type CollectorResult struct {
+	System   SystemInfo   `json:"system"`
+	Hardware HardwareInfo `json:"hardware"`
+	Network  NetworkInfo  `json:"network"`
+	Location LocationInfo `json:"location"`
+	Metrics  Metrics      `json:"metrics"`
+}
+
+// CollectAll is the top-level collection function.
+// It delegates to specialised collector functions defined in separate files.
+func CollectAll() CollectorResult {
+	sys := CollectSystemInfo()
+	hw := CollectHardware()
+	net := CollectNetworkInfo()
+	loc := CollectLocation()
+	metrics := CollectMetrics()
+
+	return CollectorResult{
+		System:   sys,
+		Hardware: hw,
+		Network:  net,
+		Location: loc,
+		Metrics:  metrics,
 	}
-
-	gatewayReachable = internetReachable // simplified
-	return
-}
-
-// Helper to convert struct to JSON string (used by buffer)
-func ToJSON(v any) ([]byte, error) {
-	return json.Marshal(v)
 }
