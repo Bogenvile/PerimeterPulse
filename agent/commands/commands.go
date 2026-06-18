@@ -14,7 +14,7 @@ type ExecResult struct {
 }
 
 func Execute(cmd string) ExecResult {
-	timeout := 30 * time.Second
+	timeout := 120 * time.Second
 
 	// Parse command (simple split)
 	parts := strings.Fields(cmd)

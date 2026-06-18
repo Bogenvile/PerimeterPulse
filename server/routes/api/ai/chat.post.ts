@@ -190,7 +190,7 @@ async function executeTool(name: string, args: any): Promise<string> {
 
     await insertCommand(asset.agent_id, args.command, "ai");
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
       const history = await getCommandHistory(asset.agent_id, 1);
       if (history.length > 0) {
@@ -203,7 +203,7 @@ async function executeTool(name: string, args: any): Promise<string> {
         }
       }
     }
-    return `Command "${args.command}" was queued but no result within 30s. The agent may be offline or busy.`;
+    return `Command "${args.command}" was queued but no result within 120s. The agent may be offline or busy.`;
   }
 
   if (name === "get_command_history") {
