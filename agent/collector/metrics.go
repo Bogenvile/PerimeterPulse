@@ -20,6 +20,7 @@ type MetricsPayload struct {
 	DiskType            string  `json:"disk_type"`
 	DiskModel           string  `json:"disk_model"`
 	DiskHealthStatus    string  `json:"disk_health_status"`
+	DiskHealthPercent   float64 `json:"disk_health_percent"`
 	DiskTemperatureC    float64 `json:"disk_temperature_c"`
 	GatewayReachable    bool    `json:"gateway_reachable"`
 	DNSWorking          bool    `json:"dns_working"`

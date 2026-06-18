@@ -35,6 +35,7 @@ export interface ExtendedAgentMetrics {
   ping_latency_ms?: number;
   error_count?: number;
   disk_health_status: "ok" | "warning" | "critical" | "unknown";
+  disk_health_percent?: number;
   disk_temperature_c: number;
   timestamp: string;
 }
@@ -99,6 +100,7 @@ export interface ExtendedAsset {
   disk_model: string;
   disk_type: string;
   disk_health_status: string;
+  disk_health_percent: number | null;
   disk_temperature_c: number | null;
   wifi_ssid: string;
   wifi_signal_dbm: number | null;
@@ -128,6 +130,7 @@ export interface MetricsDataPoint {
   ping_latency_ms?: number;
   error_count?: number;
   disk_health_status?: string;
+  disk_health_percent?: number;
   disk_temperature_c?: number;
 }
 

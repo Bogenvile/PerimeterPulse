@@ -88,6 +88,7 @@ export default defineHandler(async (event) => {
       internet_reachable: m.internet_reachable != null ? !!m.internet_reachable : null,
       default_gateway: m.default_gateway || null,
       disk_health_status: m.disk_health_status || "unknown",
+      disk_health_percent: m.disk_health_percent != null ? Number(m.disk_health_percent) : null,
       disk_temperature_c: m.disk_temperature_c != null ? Number(m.disk_temperature_c) : 0,
       timestamp: m.timestamp || new Date().toISOString(),
     };
@@ -177,17 +178,17 @@ export default defineHandler(async (event) => {
             (agent_id, hostname, os, os_version, agent_version,
              mac_addresses, ip_addresses, cpu_model, cpu_cores,
              ram_total_bytes, storage_total_bytes,
-             disk_model, disk_type, disk_health_status, disk_temperature_c,
+             disk_model, disk_type, disk_health_status, disk_health_percent, disk_temperature_c,
              wifi_ssid, wifi_signal_dbm, network_speed_mbps,
              status, last_seen_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
           [
             body.agent_id, hostname, os, osVersion, "unknown",
             n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]", ipAddresses,
             m.cpu_model || "Unknown", m.cpu_cores || 0,
             m.ram_total_bytes || 0, m.storage_total_bytes || 0,
             m.disk_model || "", m.disk_type || "unknown",
-            safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
+            safeMetrics.disk_health_status, safeMetrics.disk_health_percent, safeMetrics.disk_temperature_c,
             n.wifi_ssid || "", n.wifi_signal_dbm ?? null,
             n.network_speed_mbps ?? 0, "online",
           ],
@@ -267,6 +268,7 @@ export default defineHandler(async (event) => {
 
     updateFields.push(
       "disk_health_status=COALESCE(?, disk_health_status)",
+      "disk_health_percent=COALESCE(?, disk_health_percent)",
       "disk_temperature_c=COALESCE(?, disk_temperature_c)",
       "wifi_ssid=COALESCE(NULLIF(?, ''), wifi_ssid)",
       "wifi_signal_dbm=COALESCE(?, wifi_signal_dbm)",
@@ -280,7 +282,7 @@ export default defineHandler(async (event) => {
       "disk_type=COALESCE(NULLIF(?, ''), disk_type)",
     );
     updateValues.push(
-      safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
+      safeMetrics.disk_health_status, safeMetrics.disk_health_percent, safeMetrics.disk_temperature_c,
       n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
       n.network_speed_mbps ?? null,
       JSON.stringify(filterIPv4(n.ip_addresses || [])),

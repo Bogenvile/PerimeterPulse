@@ -71,6 +71,10 @@ func CollectMetrics(agentID string) MetricsPayload {
 
 	cpuModel, cpuCores := collectCPUInfo()
 	diskType, diskModel, diskHealth, diskTemp := collectDiskInfo()
+	diskHealthPercent := 100.0
+	if runtime.GOOS == "windows" {
+		diskHealthPercent = detectDiskHealthPercent()
+	}
 
 	return MetricsPayload{
 		CPUPerecent:       cpuPct,
@@ -90,6 +94,7 @@ func CollectMetrics(agentID string) MetricsPayload {
 		DiskType:          diskType,
 		DiskModel:         diskModel,
 		DiskHealthStatus:  diskHealth,
+		DiskHealthPercent: diskHealthPercent,
 		DiskTemperatureC:  diskTemp,
 		GatewayReachable:  diag.GatewayReachable,
 		DNSWorking:        diag.DNSWorking,

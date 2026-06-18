@@ -172,6 +172,9 @@ export async function ensureV6Schema(): Promise<void> {
   results.push(await safeAddColumn("assets", "ping_latency_ms", "DOUBLE DEFAULT 0"));
   results.push(await safeAddColumn("assets", "error_count", "INT DEFAULT 0"));
 
+  results.push(await safeAddColumn("assets", "disk_health_percent", "DECIMAL(5,2) DEFAULT NULL"));
+  results.push(await safeAddColumn("agent_metrics", "disk_health_percent", "DECIMAL(5,2) DEFAULT NULL"));
+
   results.push(await safeAddColumn("agent_locations", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0"));
   results.push(await safeAddColumn("agent_locations", "source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"));
 
@@ -241,6 +244,7 @@ interface MetricsInput {
   internet_reachable?: boolean;
   default_gateway?: string;
   disk_health_status?: string;
+  disk_health_percent?: number;
   disk_temperature_c?: number;
   timestamp: string;
 }
@@ -253,17 +257,17 @@ export async function insertMetrics(agentId: string, m: MetricsInput): Promise<v
        uptime_seconds, network_status, network_latency_ms,
        ping_latency_ms, error_count,
        gateway_reachable, dns_working, internet_reachable, default_gateway,
-       disk_health_status, disk_temperature_c, recorded_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      agentId,
-      m.cpu_percent, m.ram_percent, m.ram_used_bytes, m.ram_total_bytes,
-      m.storage_percent, m.storage_used_bytes, m.storage_total_bytes,
-      m.uptime_seconds, m.network_status, m.network_latency_ms,
-      m.ping_latency_ms ?? null, m.error_count ?? null,
-      m.gateway_reachable ?? null, m.dns_working ?? null, m.internet_reachable ?? null,
-      m.default_gateway ?? null,
-      m.disk_health_status ?? null, m.disk_temperature_c ?? null,
+        disk_health_status, disk_health_percent, disk_temperature_c, recorded_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     [
+       agentId,
+       m.cpu_percent, m.ram_percent, m.ram_used_bytes, m.ram_total_bytes,
+       m.storage_percent, m.storage_used_bytes, m.storage_total_bytes,
+       m.uptime_seconds, m.network_status, m.network_latency_ms,
+       m.ping_latency_ms ?? null, m.error_count ?? null,
+       m.gateway_reachable ?? null, m.dns_working ?? null, m.internet_reachable ?? null,
+       m.default_gateway ?? null,
+       m.disk_health_status ?? null, m.disk_health_percent ?? null, m.disk_temperature_c ?? null,
       m.timestamp ? new Date(m.timestamp) : new Date(),
     ],
   );
@@ -278,8 +282,8 @@ export async function queryMetrics(
     `SELECT
        recorded_at AS time,
        cpu_percent, ram_percent, storage_percent,
-       network_status, network_latency_ms, ping_latency_ms, error_count,
-       disk_health_status, disk_temperature_c
+      network_status, network_latency_ms, ping_latency_ms, error_count,
+        disk_health_status, disk_health_percent, disk_temperature_c
      FROM agent_metrics
      WHERE agent_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ${safeHours} HOUR)
      ORDER BY recorded_at ASC`,

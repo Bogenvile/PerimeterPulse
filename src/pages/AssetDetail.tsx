@@ -186,9 +186,10 @@ const AssetDetailPage = () => {
 
   const isDriveLetterOnly = asset.disk_model && asset.disk_model.includes(":");
   const diskDisplayName = isDriveLetterOnly ? (asset.disk_type || "Disk") : (asset.disk_model || "Unknown");
+  const healthPct = asset.disk_health_percent != null ? ` · ${Math.round(asset.disk_health_percent)}%` : "";
   const diskDisplaySub = isDriveLetterOnly
-    ? `${asset.disk_model} · ${asset.disk_type || "Unknown"} · ${asset.disk_health_status === 'ok' ? 'OK' : asset.disk_health_status}`
-    : `${asset.disk_type || "Unknown"} · ${asset.disk_health_status === 'ok' ? 'OK' : asset.disk_health_status}`;
+    ? `${asset.disk_model} · ${asset.disk_type || "Unknown"} · ${asset.disk_health_status === 'ok' ? 'OK' : asset.disk_health_status}${healthPct}`
+    : `${asset.disk_type || "Unknown"} · ${asset.disk_health_status === 'ok' ? 'OK' : asset.disk_health_status}${healthPct}`;
 
   return (
     <div className="animate-fade-in space-y-6 p-6 md:p-8">

@@ -197,6 +197,18 @@ func detectDiskInfo() (diskType, diskModel, diskHealth string, diskTemp float64)
 	return
 }
 
+func detectDiskHealthPercent() float64 {
+	script := `try{$d=Get-PhysicalDisk|Select -First 1;$r=$d|Get-StorageReliabilityCounter -EA Stop;if($r.Wear -ne $null){[math]::Max(0,100-$r.Wear)}else{switch($d.HealthStatus){'Healthy'{100}'Warning'{70}default{30}}}}catch{switch((Get-PhysicalDisk|Select -First 1).HealthStatus){'Healthy'{100}'Warning'{70}default{30}}}`
+	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
+	if err == nil {
+		trimmed := strings.TrimSpace(string(out))
+		if pct, e := strconv.ParseFloat(trimmed, 64); e == nil && pct >= 0 && pct <= 100 {
+			return pct
+		}
+	}
+	return 100
+}
+
 func getLocalIPs() []string {
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*'}).IPAddress")
