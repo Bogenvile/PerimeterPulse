@@ -10,10 +10,10 @@ import { RemoteCommands } from "@/components/dashboard/RemoteCommands";
 import { TagInput } from "@/components/dashboard/TagInput";
 import {
   ArrowLeft, Cpu, HardDrive, Wifi, Laptop, Disc, Thermometer, Network,
-  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X, Trash2, Zap,
+  Loader2, AlertCircle, Monitor, MapPin, Globe, Bug, X, Trash2, Zap, Skull,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken, updateAssetTags } from "@/lib/api";
+import { getAsset, getAssetMetrics, getAssetLocations, fetchErrorLogs, deleteAsset, setApiToken, updateAssetTags, sendCommand } from "@/lib/api";
 import { computeEffectiveStatus } from "@/lib/status";
 import { showSuccess, showError } from "@/utils/toast";
 import type { ExtendedAsset, MetricsDataPoint, LocationDataPoint, ErrorLogItem } from "@/lib/types";
@@ -129,6 +129,16 @@ const AssetDetailPage = () => {
       setDeleting(false);
     }
   }, [asset, navigate]);
+
+  const handleKillProcess = useCallback(async (pid: number, name: string) => {
+    if (!asset) return;
+    try {
+      await sendCommand(asset.id, `taskkill /F /PID ${pid}`);
+      showSuccess(`Killed ${name} (PID ${pid})`);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Failed to kill process");
+    }
+  }, [asset]);
 
   const handleSaveTags = useCallback(async () => {
     if (!asset) return;
@@ -309,8 +319,9 @@ const AssetDetailPage = () => {
       {/* Top Processes */}
       {asset.process_list && asset.process_list.length > 0 && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">Top Processes</h3>
+            <span className="text-xs text-muted-foreground">{asset.process_list.length} processes</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -319,7 +330,8 @@ const AssetDetailPage = () => {
                   <th className="text-left px-5 py-2 font-medium">Name</th>
                   <th className="text-right px-3 py-2 font-medium">PID</th>
                   <th className="text-right px-3 py-2 font-medium">CPU</th>
-                  <th className="text-right px-5 py-2 font-medium">Memory</th>
+                  <th className="text-right px-3 py-2 font-medium">Memory</th>
+                  {isAdmin && <th className="text-center px-3 py-2 font-medium w-16">Kill</th>}
                 </tr>
               </thead>
               <tbody>
@@ -328,7 +340,18 @@ const AssetDetailPage = () => {
                     <td className="px-5 py-1.5 font-mono">{p.name}</td>
                     <td className="text-right px-3 py-1.5 text-muted-foreground">{p.pid}</td>
                     <td className="text-right px-3 py-1.5">{p.cpu.toFixed(1)}s</td>
-                    <td className="text-right px-5 py-1.5">{p.memory_mb.toFixed(0)} MB</td>
+                    <td className="text-right px-3 py-1.5">{p.memory_mb.toFixed(0)} MB</td>
+                    {isAdmin && (
+                      <td className="text-center px-1 py-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleKillProcess(p.pid, p.name); }}
+                          className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors"
+                          title={`Kill ${p.name}`}
+                        >
+                          <Skull className="h-3 w-3" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
