@@ -4,7 +4,34 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PerimeterPulse — Self-Hosted Agent Monitoring</title>
-<meta name="description" content="Open-source, self-hosted PC health and location monitoring. Deploy lightweight agents. Track CPU, RAM, disk, network in real-time.">
+<meta name="description" content="PerimeterPulse adalah platform monitoring open-source self-hosted. Pantau CPU, RAM, disk, jaringan, dan lokasi PC secara real-time dengan agent ringan.">
+<meta name="keywords" content="pc monitoring, agent monitoring, self-hosted monitoring, open source monitoring, IT infrastructure, disk health, cpu monitor, network monitor, remote command, process manager, server monitoring">
+<meta name="author" content="PerimeterPulse">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://perimeterpulse.dev">
+<meta property="og:title" content="PerimeterPulse — Self-Hosted Agent Monitoring">
+<meta property="og:description" content="Open-source, self-hosted PC health and location monitoring. Track CPU, RAM, disk, network in real-time. MIT licensed.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://perimeterpulse.dev">
+<meta property="og:image" content="https://opengraph.githubassets.com/1/Bogenvile/PerimeterPulse">
+<meta property="og:locale" content="id_ID">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PerimeterPulse — Self-Hosted Agent Monitoring">
+<meta name="twitter:description" content="Self-hosted PC monitoring. Open source. MIT licensed.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "PerimeterPulse",
+  "applicationCategory": "MonitoringApplication",
+  "operatingSystem": "Windows, Linux",
+  "description": "Open-source self-hosted agent-based PC health and location monitoring platform.",
+  "license": "https://opensource.org/licenses/MIT",
+  "url": "https://github.com/Bogenvile/PerimeterPulse",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,78 +40,45 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --bg: #fafafa;
-    --bg2: #ffffff;
-    --border: #e5e7eb;
-    --text: #111827;
-    --muted: #6b7280;
-    --primary: #6366f1;
-    --primary-light: #eef2ff;
-    --green: #16a34a;
-    --green-bg: #f0fdf4;
-    --amber: #d97706;
-    --amber-bg: #fffbeb;
-    --red: #dc2626;
-    --red-bg: #fef2f2;
-    --radius: 12px;
-    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+    --bg: #fafafa; --bg2: #ffffff; --border: #e5e7eb; --text: #111827; --muted: #6b7280;
+    --primary: #6366f1; --primary-light: #eef2ff;
+    --green: #16a34a; --green-bg: #f0fdf4;
+    --amber: #d97706; --amber-bg: #fffbeb;
+    --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
     --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.06), 0 2px 4px -2px rgba(0,0,0,0.05);
   }
   html { scroll-behavior: smooth; }
-  body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; -webkit-font-smoothing: antialiased; }
   .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  [data-lang] { display: none; }
+  [data-lang].active { display: unset; }
+  span[data-lang].active { display: inline; }
+  div[data-lang].active { display: block; }
 
-  nav {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-    background: rgba(255,255,255,0.8); backdrop-filter: blur(16px);
-    border-bottom: 1px solid var(--border);
-  }
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(255,255,255,0.8); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); }
   nav .container { display: flex; align-items: center; justify-content: space-between; height: 60px; }
   .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); }
-  .logo-icon {
-    width: 34px; height: 34px; border-radius: 8px;
-    background: var(--primary); display: flex; align-items: center; justify-content: center;
-    font-size: 15px; font-weight: 800; color: #fff;
-  }
+  .logo-icon { width: 34px; height: 34px; border-radius: 8px; background: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: #fff; }
   .logo-text { font-weight: 700; font-size: 17px; color: var(--text); letter-spacing: -0.01em; }
-  .nav-links { display: flex; gap: 28px; align-items: center; }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
   .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color .15s; }
   .nav-links a:hover { color: var(--text); }
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 11px 22px; border-radius: 8px; font-size: 14px; font-weight: 600;
-    text-decoration: none; transition: all .15s; border: none; cursor: pointer;
-    font-family: inherit; letter-spacing: -0.01em;
-  }
+  .lang-toggle { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .lang-toggle button { padding: 6px 12px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; background: transparent; color: var(--muted); font-family: inherit; transition: all .15s; }
+  .lang-toggle button.active { background: var(--primary); color: #fff; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; transition: all .15s; border: none; cursor: pointer; font-family: inherit; letter-spacing: -0.01em; }
   .btn-primary { background: var(--primary); color: #fff; }
   .btn-primary:hover { background: #4f46e5; box-shadow: 0 4px 14px rgba(99,102,241,0.3); transform: translateY(-1px); }
   .btn-outline { background: var(--bg2); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); }
   .btn-outline:hover { border-color: var(--primary); background: var(--primary-light); }
-  .badge {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
-    letter-spacing: -0.01em;
-  }
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; letter-spacing: -0.01em; }
   .badge-green { background: var(--green-bg); color: var(--green); }
   .badge-amber { background: var(--amber-bg); color: var(--amber); }
   .badge-purple { background: var(--primary-light); color: var(--primary); }
 
   .hero { padding: 160px 0 100px; text-align: center; position: relative; }
-  .hero::before {
-    content: ''; position: absolute; top: -150px; left: 50%; transform: translateX(-50%);
-    width: 700px; height: 700px; border-radius: 50%;
-    background: radial-gradient(circle, rgba(99,102,241,0.06), transparent 70%);
-    pointer-events: none;
-  }
-  .hero h1 {
-    font-size: clamp(34px, 5.5vw, 56px); font-weight: 800; line-height: 1.1;
-    letter-spacing: -0.02em; color: var(--text);
-    position: relative;
-  }
+  .hero::before { content: ''; position: absolute; top: -150px; left: 50%; transform: translateX(-50%); width: 700px; height: 700px; border-radius: 50%; background: radial-gradient(circle, rgba(99,102,241,0.06), transparent 70%); pointer-events: none; }
+  .hero h1 { font-size: clamp(34px, 5.5vw, 56px); font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; color: var(--text); position: relative; }
   .hero h1 span { color: var(--primary); }
   .hero p { color: var(--muted); font-size: 18px; max-width: 580px; margin: 20px auto 36px; line-height: 1.7; }
   .hero-badges { display: flex; justify-content: center; gap: 10px; margin-bottom: 36px; flex-wrap: wrap; }
@@ -92,48 +86,28 @@
 
   section { padding: 100px 0; }
   .section-label { text-align: center; margin-bottom: 14px; }
-  .section-label span {
-    color: var(--primary); font-size: 13px; font-weight: 700;
-    letter-spacing: 0.06em; text-transform: uppercase;
-  }
+  .section-label span { color: var(--primary); font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
   .section-title { text-align: center; font-size: 34px; font-weight: 800; margin-bottom: 14px; letter-spacing: -0.02em; }
   .section-sub { text-align: center; color: var(--muted); font-size: 17px; max-width: 540px; margin: 0 auto 56px; line-height: 1.7; }
 
   .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
-  .feature-card {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 32px; box-shadow: var(--shadow); transition: box-shadow .2s, border-color .2s;
-  }
+  .feature-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; box-shadow: var(--shadow); transition: box-shadow .2s, border-color .2s; }
   .feature-card:hover { box-shadow: var(--shadow-md); border-color: #d1d5db; }
-  .feature-icon {
-    width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-    margin-bottom: 18px; font-size: 24px;
-  }
+  .feature-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 18px; font-size: 24px; }
   .feature-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; }
   .feature-card p { color: var(--muted); font-size: 14px; line-height: 1.7; }
 
   .arch-flow { display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 24px 0; }
-  .arch-box {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 24px 32px; text-align: center; min-width: 150px; box-shadow: var(--shadow);
-  }
+  .arch-box { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 32px; text-align: center; min-width: 150px; box-shadow: var(--shadow); }
   .arch-box i { font-size: 32px; color: var(--primary); margin-bottom: 8px; }
   .arch-box big { display: block; font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: -0.01em; }
   .arch-box small { color: var(--muted); font-size: 12px; }
   .arch-arrow { color: #d1d5db; font-size: 24px; font-weight: 300; }
 
   .tech-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-  .tech-badge {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 20px; font-size: 13px; font-weight: 600; color: var(--text);
-    box-shadow: var(--shadow); letter-spacing: -0.01em;
-  }
+  .tech-badge { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; color: var(--text); box-shadow: var(--shadow); letter-spacing: -0.01em; }
 
-  .oss-card {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 56px 40px; text-align: center; max-width: 720px; margin: 0 auto;
-    box-shadow: var(--shadow);
-  }
+  .oss-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 56px 40px; text-align: center; max-width: 720px; margin: 0 auto; box-shadow: var(--shadow); }
   .oss-card h2 { font-size: 28px; font-weight: 800; margin-bottom: 12px; letter-spacing: -0.02em; }
   .oss-card p { color: var(--muted); font-size: 16px; margin-bottom: 24px; line-height: 1.7; }
   .oss-badges { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 28px; }
@@ -172,10 +146,15 @@
       <span class="logo-text">PerimeterPulse</span>
     </a>
     <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#architecture">How It Works</a>
-      <a href="#oss">Open Source</a>
+      <a href="#features"><span data-lang="en" class="active">Features</span><span data-lang="id">Fitur</span></a>
+      <a href="#architecture"><span data-lang="en" class="active">How It Works</span><span data-lang="id">Cara Kerja</span></a>
+      <a href="#agent"><span data-lang="en" class="active">AI Agent</span><span data-lang="id">AI Agent</span></a>
+      <a href="#oss"><span data-lang="en" class="active">Open Source</span><span data-lang="id">Open Source</span></a>
       <a href="https://github.com/Bogenvile/PerimeterPulse" target="_blank">GitHub</a>
+    </div>
+    <div class="lang-toggle">
+      <button id="btn-en" class="active" onclick="switchLang('en')">EN</button>
+      <button id="btn-id" onclick="switchLang('id')">ID</button>
     </div>
   </div>
 </nav>
@@ -183,73 +162,79 @@
 <header class="hero">
   <div class="container">
     <div class="hero-badges">
-      <span class="badge badge-green"><i class="ph ph-check-circle"></i> Open Source</span>
-      <span class="badge badge-purple"><i class="ph ph-house"></i> Self-Hosted</span>
-      <span class="badge badge-amber"><i class="ph ph-shield-check"></i> MIT License</span>
+      <span class="badge badge-green"><i class="ph ph-check-circle"></i> <span data-lang="en" class="active">Open Source</span><span data-lang="id">Open Source</span></span>
+      <span class="badge badge-purple"><i class="ph ph-house"></i> <span data-lang="en" class="active">Self-Hosted</span><span data-lang="id">Self-Hosted</span></span>
+      <span class="badge badge-amber"><i class="ph ph-shield-check"></i> <span data-lang="en" class="active">MIT License</span><span data-lang="id">Lisensi MIT</span></span>
     </div>
-    <h1>Monitor Your <span>Infrastructure</span><br>From One Dashboard</h1>
-    <p>PerimeterPulse is a self-hosted, open-source monitoring platform. Deploy lightweight agents on your computers and track CPU, RAM, disk health, network status, and location — all in real-time.</p>
+    <h1>
+      <span data-lang="en" class="active">Monitor Your <span>Infrastructure</span><br>From One Dashboard</span>
+      <span data-lang="id">Pantau <span>Infrastruktur</span> Anda<br>Dari Satu Dashboard</span>
+    </h1>
+    <p>
+      <span data-lang="en" class="active">PerimeterPulse is a self-hosted, open-source monitoring platform. Deploy lightweight agents on your computers and track CPU, RAM, disk health, network status, and location — all in real-time.</span>
+      <span data-lang="id">PerimeterPulse adalah platform monitoring open-source self-hosted. Pasang agent ringan di komputer Anda dan pantau CPU, RAM, kesehatan disk, status jaringan, dan lokasi — semuanya real-time.</span>
+    </p>
     <div class="hero-actions">
       <a href="https://github.com/Bogenvile/PerimeterPulse" target="_blank" class="btn btn-primary">
-        <i class="ph ph-github-logo"></i> View on GitHub
+        <i class="ph ph-github-logo"></i> <span data-lang="en" class="active">View on GitHub</span><span data-lang="id">Lihat di GitHub</span>
       </a>
       <a href="#features" class="btn btn-outline">
-        <i class="ph ph-arrow-down"></i> Explore Features
+        <i class="ph ph-arrow-down"></i> <span data-lang="en" class="active">Explore Features</span><span data-lang="id">Jelajahi Fitur</span>
       </a>
     </div>
     <div class="stats-row">
-      <div class="stat"><big>~9 MB</big><small>Agent Size</small></div>
-      <div class="stat"><big>60s</big><small>Heartbeat Interval</small></div>
-      <div class="stat"><big>Docker</big><small>Deploy in Minutes</small></div>
+      <div class="stat"><big>~9 MB</big><small><span data-lang="en" class="active">Agent Size</span><span data-lang="id">Ukuran Agent</span></small></div>
+      <div class="stat"><big>60s</big><small><span data-lang="en" class="active">Heartbeat</span><span data-lang="id">Interval</span></small></div>
+      <div class="stat"><big>Docker</big><small><span data-lang="en" class="active">Deploy</span><span data-lang="id">Deploy</span></small></div>
     </div>
   </div>
 </header>
 
 <section id="features">
   <div class="container">
-    <div class="section-label"><span>Features</span></div>
-    <h2 class="section-title">Everything You Need</h2>
-    <p class="section-sub">A single lightweight agent on each PC sends real-time telemetry to your server. No cloud dependency.</p>
+    <div class="section-label"><span data-lang="en" class="active">Features</span><span data-lang="id">Fitur</span></div>
+    <h2 class="section-title"><span data-lang="en" class="active">Everything You Need</span><span data-lang="id">Semua yang Anda Butuhkan</span></h2>
+    <p class="section-sub"><span data-lang="en" class="active">A single lightweight agent on each PC sends real-time telemetry to your server. No cloud dependency.</span><span data-lang="id">Satu agent ringan di setiap PC mengirim data real-time ke server Anda. Tanpa ketergantungan cloud.</span></p>
     <div class="features">
       <div class="feature-card">
         <div class="feature-icon" style="background:var(--primary-light);color:var(--primary);"><i class="ph-fill ph-cpu"></i></div>
-        <h3>Hardware Monitoring</h3>
-        <p>Real-time CPU usage, RAM consumption, storage utilization, and uptime with interactive time-series charts.</p>
+        <h3><span data-lang="en" class="active">Hardware Monitoring</span><span data-lang="id">Monitoring Hardware</span></h3>
+        <p><span data-lang="en" class="active">Real-time CPU usage, RAM consumption, storage utilization, and uptime with interactive time-series charts.</span><span data-lang="id">CPU, RAM, penyimpanan, dan uptime real-time dengan grafik time-series interaktif.</span></p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:var(--red-bg);color:var(--red);"><i class="ph-fill ph-hard-drive"></i></div>
-        <h3>Disk Health Scoring</h3>
-        <p>Health percentage for SSD &amp; HDD. SMART Wear detection. Color warnings when health drops below 90%.</p>
+        <div class="feature-icon" style="background:#fef2f2;color:#dc2626;"><i class="ph-fill ph-hard-drive"></i></div>
+        <h3><span data-lang="en" class="active">Disk Health Scoring</span><span data-lang="id">Skor Kesehatan Disk</span></h3>
+        <p><span data-lang="en" class="active">Health percentage for SSD &amp; HDD. SMART Wear detection. Color warnings when health drops below 90%.</span><span data-lang="id">Persentase kesehatan SSD &amp; HDD. Deteksi SMART Wear. Peringatan warna jika kesehatan di bawah 90%.</span></p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:var(--green-bg);color:var(--green);"><i class="ph-fill ph-wifi-high"></i></div>
-        <h3>Network Diagnostics</h3>
-        <p>WiFi signal strength, link speed, gateway IP, DNS check, internet reachability, and ping latency.</p>
+        <h3><span data-lang="en" class="active">Network Diagnostics</span><span data-lang="id">Diagnostik Jaringan</span></h3>
+        <p><span data-lang="en" class="active">WiFi signal strength, link speed, gateway IP, DNS check, internet reachability, and ping latency.</span><span data-lang="id">Kekuatan sinyal WiFi, kecepatan link, gateway, DNS, konektivitas internet, dan latensi ping.</span></p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:var(--amber-bg);color:var(--amber);"><i class="ph-fill ph-map-pin"></i></div>
-        <h3>Location Tracking</h3>
-        <p>GPS &amp; GeoIP location with Leaflet maps. See all your PCs plotted on a world map in real-time.</p>
+        <h3><span data-lang="en" class="active">Location Tracking</span><span data-lang="id">Pelacakan Lokasi</span></h3>
+        <p><span data-lang="en" class="active">GPS &amp; GeoIP location with Leaflet maps. See all your PCs plotted on a world map in real-time.</span><span data-lang="id">Lokasi GPS &amp; GeoIP dengan peta Leaflet. Lihat semua PC di peta dunia secara real-time.</span></p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:#f5f3ff;color:#7c3aed;"><i class="ph-fill ph-terminal-window"></i></div>
-        <h3>Remote Commands</h3>
-        <p>Execute shell commands on any agent. Kill processes, run diagnostics, restart services — from the dashboard.</p>
+        <h3><span data-lang="en" class="active">Remote Commands</span><span data-lang="id">Perintah Jarak Jauh</span></h3>
+        <p><span data-lang="en" class="active">Execute shell commands on any agent. Kill processes, run diagnostics, restart services — from the dashboard.</span><span data-lang="id">Jalankan perintah shell di agent manapun. Matikan proses, diagnostik, restart layanan — dari dashboard.</span></p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:#f0f9ff;color:#0284c7;"><i class="ph-fill ph-list-checks"></i></div>
-        <h3>Process Manager</h3>
-        <p>Top processes by RAM with app window titles. Kill misbehaving processes with a single click.</p>
+        <h3><span data-lang="en" class="active">Process Manager</span><span data-lang="id">Manajer Proses</span></h3>
+        <p><span data-lang="en" class="active">Top processes by RAM with app window titles. Kill misbehaving processes with a single click.</span><span data-lang="id">Proses teratas berdasarkan RAM dengan judul jendela aplikasi. Matikan proses bermasalah sekali klik.</span></p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:#fdf2f8;color:#db2777;"><i class="ph-fill ph-bell-ringing"></i></div>
-        <h3>Alert Notifications</h3>
-        <p>Telegram &amp; email alerts on status changes. Configurable thresholds for CPU, RAM, and storage.</p>
+        <h3><span data-lang="en" class="active">Alert Notifications</span><span data-lang="id">Notifikasi Peringatan</span></h3>
+        <p><span data-lang="en" class="active">Telegram &amp; email alerts on status changes. Configurable thresholds for CPU, RAM, and storage.</span><span data-lang="id">Peringatan Telegram &amp; email saat status berubah. Ambang batas CPU, RAM, dan penyimpanan bisa diatur.</span></p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:#ecfdf5;color:#059669;"><i class="ph-fill ph-arrows-clockwise"></i></div>
-        <h3>Auto-Updates</h3>
-        <p>Agents check for new versions every 5 minutes. Download, self-replace, and restart automatically.</p>
+        <h3><span data-lang="en" class="active">Auto-Updates</span><span data-lang="id">Pembaruan Otomatis</span></h3>
+        <p><span data-lang="en" class="active">Agents check for new versions every 5 minutes. Download, self-replace, and restart automatically.</span><span data-lang="id">Agent memeriksa versi baru setiap 5 menit. Unduh, ganti sendiri, dan restart otomatis.</span></p>
       </div>
     </div>
   </div>
@@ -257,32 +242,41 @@
 
 <section id="architecture" style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
   <div class="container">
-    <div class="section-label"><span>Architecture</span></div>
-    <h2 class="section-title">How It Works</h2>
-    <p class="section-sub">Agents send heartbeats every 60 seconds. Your server processes and stores everything in MySQL. View it all from a single dashboard.</p>
+    <div class="section-label"><span data-lang="en" class="active">Architecture</span><span data-lang="id">Arsitektur</span></div>
+    <h2 class="section-title"><span data-lang="en" class="active">How It Works</span><span data-lang="id">Cara Kerja</span></h2>
+    <p class="section-sub"><span data-lang="en" class="active">Agents send heartbeats every 60 seconds. Your server processes and stores everything in MySQL. View it all from a single dashboard.</span><span data-lang="id">Agent mengirim heartbeat setiap 60 detik. Server memproses dan menyimpan semuanya di MySQL. Lihat semua dari satu dashboard.</span></p>
     <div class="arch-flow">
-      <div class="arch-box">
-        <i class="ph-fill ph-desktop"></i>
-        <big>Go Agent</big>
-        <small>~9 MB binary</small>
-      </div>
+      <div class="arch-box"><i class="ph-fill ph-desktop"></i><big>Go Agent</big><small>~9 MB</small></div>
       <span class="arch-arrow">→</span>
-      <div class="arch-box">
-        <i class="ph-fill ph-lightning"></i>
-        <big>Nitro Server</big>
-        <small>Node.js</small>
-      </div>
+      <div class="arch-box"><i class="ph-fill ph-lightning"></i><big>Nitro Server</big><small>Node.js</small></div>
       <span class="arch-arrow">→</span>
-      <div class="arch-box">
-        <i class="ph-fill ph-database"></i>
-        <big>MySQL</big>
-        <small>8.4</small>
-      </div>
+      <div class="arch-box"><i class="ph-fill ph-database"></i><big>MySQL</big><small>8.4</small></div>
       <span class="arch-arrow">→</span>
-      <div class="arch-box">
-        <i class="ph-fill ph-browsers"></i>
-        <big>Dashboard</big>
-        <small>React + shadcn/ui</small>
+      <div class="arch-box"><i class="ph-fill ph-browsers"></i><big>Dashboard</big><small>React + shadcn/ui</small></div>
+    </div>
+  </div>
+</section>
+
+<section id="agent">
+  <div class="container">
+    <div class="section-label"><span>AI Agent</span></div>
+    <h2 class="section-title"><span data-lang="en" class="active">Build An AI Agent</span><span data-lang="id">Bangun AI Agent</span></h2>
+    <p class="section-sub"><span data-lang="en" class="active">PerimeterPulse includes a built-in AI assistant with function calling. Ask questions about your infrastructure, run diagnostics, and execute commands — all through natural language.</span><span data-lang="id">PerimeterPulse dilengkapi asisten AI bawaan dengan function calling. Tanya tentang infrastruktur, jalankan diagnostik, dan eksekusi perintah — semua dengan bahasa alami.</span></p>
+    <div class="features" style="max-width:960px;margin:0 auto;">
+      <div class="feature-card">
+        <div class="feature-icon" style="background:#f0f9ff;color:#0284c7;"><i class="ph-fill ph-chat-circle-text"></i></div>
+        <h3><span data-lang="en" class="active">Natural Language Queries</span><span data-lang="id">Query Bahasa Alami</span></h3>
+        <p><span data-lang="en" class="active">Ask "Which assets are online?" or "Show disk health warnings" — the AI understands and responds with real data.</span><span data-lang="id">Tanya "Aset mana yang online?" atau "Tampilkan peringatan disk" — AI memahami dan merespons dengan data nyata.</span></p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:#f5f3ff;color:#7c3aed;"><i class="ph-fill ph-toolbox"></i></div>
+        <h3><span data-lang="en" class="active">Tool Calling</span><span data-lang="id">Pemanggilan Tools</span></h3>
+        <p><span data-lang="en" class="active">get_asset_detail, run_command, get_command_history — the AI invokes real platform functions to help you troubleshoot.</span><span data-lang="id">get_asset_detail, run_command, get_command_history — AI memanggil fungsi platform nyata untuk membantu Anda.</span></p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:var(--green-bg);color:var(--green);"><i class="ph-fill ph-brain"></i></div>
+        <h3><span data-lang="en" class="active">Any LLM Provider</span><span data-lang="id">Provider LLM Apapun</span></h3>
+        <p><span data-lang="en" class="active">Works with OpenAI, DeepSeek, Groq, Ollama, or any OpenAI-compatible API. Bring your own key.</span><span data-lang="id">Bekerja dengan OpenAI, DeepSeek, Groq, Ollama, atau API kompatibel OpenAI apapun. Bawa kunci Anda sendiri.</span></p>
       </div>
     </div>
   </div>
@@ -291,15 +285,15 @@
 <section id="oss">
   <div class="container">
     <div class="oss-card">
-      <h2>Open Source &amp; Self-Hosted</h2>
-      <p>PerimeterPulse is fully open-source under the MIT license. No cloud dependency, no telemetry, no vendor lock-in. You own your infrastructure and your data.</p>
+      <h2><span data-lang="en" class="active">Open Source &amp; Self-Hosted</span><span data-lang="id">Open Source &amp; Self-Hosted</span></h2>
+      <p><span data-lang="en" class="active">PerimeterPulse is fully open-source under the MIT license. No cloud dependency, no telemetry, no vendor lock-in. You own your infrastructure and your data.</span><span data-lang="id">PerimeterPulse sepenuhnya open-source dengan lisensi MIT. Tanpa ketergantungan cloud, tanpa telemetri, tanpa vendor lock-in. Anda memiliki infrastruktur dan data Anda.</span></p>
       <div class="oss-badges">
-        <span class="badge badge-green"><i class="ph ph-scales"></i> MIT License</span>
-        <span class="badge badge-purple"><i class="ph ph-hard-drives"></i> Self-Hosted</span>
-        <span class="badge badge-amber"><i class="ph ph-eye-slash"></i> No Telemetry</span>
+        <span class="badge badge-green"><i class="ph ph-scales"></i> MIT</span>
+        <span class="badge badge-purple"><i class="ph ph-hard-drives"></i> <span data-lang="en" class="active">Self-Hosted</span><span data-lang="id">Self-Hosted</span></span>
+        <span class="badge badge-amber"><i class="ph ph-eye-slash"></i> <span data-lang="en" class="active">No Telemetry</span><span data-lang="id">Tanpa Telemetri</span></span>
       </div>
       <a href="https://github.com/Bogenvile/PerimeterPulse" target="_blank" class="btn btn-primary">
-        <i class="ph ph-github-logo"></i> Star on GitHub
+        <i class="ph ph-github-logo"></i> <span data-lang="en" class="active">Star on GitHub</span><span data-lang="id">Bintang di GitHub</span>
       </a>
     </div>
   </div>
@@ -307,9 +301,8 @@
 
 <section style="background:var(--bg2);border-top:1px solid var(--border);">
   <div class="container">
-    <div class="section-label"><span>Tech Stack</span></div>
-    <h2 class="section-title">Built With</h2>
-    <p class="section-sub">Production-grade tools chosen for performance and developer experience.</p>
+    <div class="section-label"><span data-lang="en" class="active">Tech Stack</span><span data-lang="id">Teknologi</span></div>
+    <h2 class="section-title"><span data-lang="en" class="active">Built With</span><span data-lang="id">Dibangun Dengan</span></h2>
     <div class="tech-grid">
       <span class="tech-badge">Go 1.21</span>
       <span class="tech-badge">Nitro v3</span>
@@ -322,20 +315,36 @@
       <span class="tech-badge">Leaflet Maps</span>
       <span class="tech-badge">Docker</span>
       <span class="tech-badge">JWT Auth</span>
+      <span class="tech-badge">OpenAI API</span>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="container">
-    <p>&copy; 2026 PerimeterPulse. MIT Licensed. Self-hosted infrastructure monitoring.</p>
+    <p>&copy; 2026 PerimeterPulse. MIT Licensed. <span data-lang="en" class="active">Self-hosted infrastructure monitoring.</span><span data-lang="id">Monitoring infrastruktur self-hosted.</span></p>
     <div class="footer-links">
       <a href="https://github.com/Bogenvile/PerimeterPulse" target="_blank"><i class="ph ph-github-logo"></i> GitHub</a>
-      <a href="#features">Features</a>
-      <a href="#architecture">Architecture</a>
+      <a href="#features"><span data-lang="en" class="active">Features</span><span data-lang="id">Fitur</span></a>
+      <a href="#architecture"><span data-lang="en" class="active">Architecture</span><span data-lang="id">Arsitektur</span></a>
     </div>
   </div>
 </footer>
+
+<script>
+  function switchLang(lang) {
+    document.querySelectorAll('[data-lang]').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll(`[data-lang="${lang}"]`).forEach(el => el.classList.add('active'));
+    document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+    document.getElementById('btn-id').classList.toggle('active', lang === 'id');
+    document.documentElement.lang = lang;
+    try { localStorage.setItem('pp-lang', lang); } catch(e) {}
+  }
+  (function() {
+    const saved = localStorage.getItem('pp-lang');
+    if (saved === 'id') switchLang('id');
+  })();
+</script>
 
 </body>
 </html>
