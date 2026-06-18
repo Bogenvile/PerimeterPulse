@@ -418,31 +418,119 @@ export async function ensureErrorLogsTable(): Promise<void> {
 
 export async function getAssetSummaryContext(): Promise<string> {
   try {
-    // Use subquery approach compatible with MySQL 8.0 (no LATERAL JOIN)
     const assets = await query(`
       SELECT
         a.agent_id, a.hostname, a.os, a.status, a.last_seen_at,
         a.cpu_model, a.cpu_cores,
         a.ram_total_bytes, a.storage_total_bytes,
-        a.disk_health_status, a.disk_temperature_c,
+        a.disk_health_status, a.disk_health_percent, a.disk_temperature_c,
+        a.disk_model, a.disk_type,
         a.wifi_ssid, a.network_speed_mbps,
-        a.ping_latency_ms, a.error_count
+        a.ping_latency_ms, a.error_count,
+        a.city, a.country, a.ip_addresses
       FROM assets a
       ORDER BY a.hostname
     `);
 
     if (assets.length === 0) return "No assets registered.";
 
+    const metrics = await query(`
+      SELECT m.agent_id,
+        m.cpu_percent, m.ram_percent, m.storage_percent,
+        m.uptime_seconds, m.network_status,
+        m.gateway_reachable, m.dns_working, m.internet_reachable
+      FROM agent_metrics m
+      INNER JOIN (
+        SELECT agent_id, MAX(recorded_at) as max_time
+        FROM agent_metrics
+        GROUP BY agent_id
+      ) latest ON m.agent_id = latest.agent_id AND m.recorded_at = latest.max_time
+    `);
+    const metricMap = new Map<string, Record<string, unknown>>();
+    for (const m of metrics) {
+      metricMap.set(m.agent_id as string, m);
+    }
+
+    function fmtBytes(b: unknown): string {
+      const n = Number(b) || 0;
+      if (n >= 1e12) return `${(n / 1e12).toFixed(1)} TB`;
+      if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+      return `${(n / 1e6).toFixed(0)} MB`;
+    }
+
+    function fmtPct(v: unknown): string {
+      const n = Number(v) || 0;
+      return `${n.toFixed(1)}%`;
+    }
+
     let summary = `Total Assets: ${assets.length}\n\n`;
     for (const a of assets) {
-      summary += `- ${a.hostname} (${a.os}) | Status: ${a.status}`;
-      if (a.disk_health_status && a.disk_health_status !== "ok")
+      const m = metricMap.get(a.agent_id as string);
+      summary += `${a.hostname} (${a.os}) | Status: ${a.status}`;
+      summary += ` | CPU: ${a.cpu_model || "?"} (${a.cpu_cores || 0} cores)`;
+      summary += ` | RAM: ${fmtBytes(a.ram_total_bytes)} | Storage: ${fmtBytes(a.storage_total_bytes)}`;
+      if (m) {
+        summary += ` | Live: CPU ${fmtPct(m.cpu_percent)} RAM ${fmtPct(m.ram_percent)} Storage ${fmtPct(m.storage_percent)}`;
+        summary += ` | Uptime: ${Math.floor(Number(m.uptime_seconds || 0) / 3600)}h`;
+      }
+      if (a.ping_latency_ms) summary += ` | Ping: ${Number(a.ping_latency_ms).toFixed(0)}ms`;
+      if (a.disk_health_status && a.disk_health_status !== "ok") {
         summary += ` | Disk: ${a.disk_health_status}`;
+        if (a.disk_health_percent != null) summary += ` (${Number(a.disk_health_percent).toFixed(0)}%)`;
+      }
+      if (a.disk_health_percent != null && Number(a.disk_health_percent) < 90) {
+        summary += ` ⚠ HEALTH ${Number(a.disk_health_percent).toFixed(0)}%`;
+      }
+      if (a.error_count > 0) summary += ` | Errors: ${a.error_count}`;
+      if (a.city) summary += ` | Location: ${a.city}, ${a.country}`;
       summary += `\n`;
     }
+
+    const warnings = assets.filter((a: any) => a.disk_health_status === "warning" || a.disk_health_status === "critical");
+    if (warnings.length > 0) {
+      summary += `\n⚠ Disk Issues: ${warnings.map((a: any) => `${a.hostname} (${a.disk_health_status})`).join(", ")}`;
+    }
+
+    const offline = assets.filter((a: any) => a.status === "offline" || a.status === "critical");
+    if (offline.length > 0) {
+      summary += `\n🔴 Offline/Critical: ${offline.map((a: any) => a.hostname).join(", ")}`;
+    }
+
     return summary;
   } catch (err) {
     console.error("[AI] getAssetSummaryContext failed:", err);
     return "Asset data temporarily unavailable.";
   }
+}
+
+export async function getAssetDetailForAI(hostname: string): Promise<string> {
+  const asset = await queryOne<any>(
+    `SELECT * FROM assets WHERE hostname = ? OR agent_id = ?`, [hostname, hostname],
+  );
+  if (!asset) return `No asset found matching "${hostname}".`;
+  const metrics = await query<any>(
+    `SELECT * FROM agent_metrics WHERE agent_id = ? ORDER BY recorded_at DESC LIMIT 5`,
+    [asset.agent_id],
+  );
+  const errors = await query<any>(
+    `SELECT error_message, error_time FROM agent_error_logs WHERE agent_id = ? ORDER BY error_time DESC LIMIT 10`,
+    [asset.agent_id],
+  );
+  let result = `${asset.hostname} (${asset.os}) — Status: ${asset.status}\n`;
+  result += `CPU: ${asset.cpu_model || "?"} (${asset.cpu_cores} cores)\n`;
+  result += `RAM: ${(Number(asset.ram_total_bytes)/1e9).toFixed(1)} GB | Storage: ${(Number(asset.storage_total_bytes)/1e9).toFixed(1)} GB\n`;
+  result += `Disk: ${asset.disk_model || "?"} (${asset.disk_type}) Health: ${asset.disk_health_status}`;
+  if (asset.disk_health_percent != null) result += ` (${Number(asset.disk_health_percent).toFixed(0)}%)`;
+  result += `\nWiFi: ${asset.wifi_ssid || "N/A"} | Speed: ${asset.network_speed_mbps} Mbps\n`;
+  result += `Ping: ${asset.ping_latency_ms || 0}ms | Errors: ${asset.error_count || 0}`;
+  if (asset.city) result += ` | Location: ${asset.city}, ${asset.country}`;
+  if (metrics.length > 0) {
+    result += `\nLatest metrics:` + metrics.map((m: any) =>
+      `  CPU ${m.cpu_percent}% RAM ${m.ram_percent}% Storage ${m.storage_percent}% at ${m.recorded_at}`
+    ).join("\n");
+  }
+  if (errors.length > 0) {
+    result += `\nRecent errors:` + errors.map((e: any) => `  ${e.error_time}: ${e.error_message}`).join("\n");
+  }
+  return result;
 }

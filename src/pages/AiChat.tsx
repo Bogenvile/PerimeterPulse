@@ -1,20 +1,26 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check } from "lucide-react";
+import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check, Wrench } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { sendAiMessage, setApiToken } from "@/lib/api";
+import { setApiToken } from "@/lib/api";
 import { AiMarkdown } from "@/components/AiMarkdown";
 
 interface Message {
   role: "user" | "ai";
   content: string;
   isError?: boolean;
+  toolCalls?: string[];
+}
+
+interface ChatHistory {
+  role: string;
+  content: string;
 }
 
 const suggestedQuestions = [
-  "Which assets are currently online?",
-  "Show me all assets with critical status",
-  "What's the average CPU usage across all assets?",
-  "Any disk health warnings I should know about?",
+  "What assets are online right now?",
+  "Show me all assets with disk health warnings",
+  "Check disk health on all assets",
+  "Show me CPU usage across all systems",
 ];
 
 export default function AiChatPage() {
@@ -39,43 +45,50 @@ export default function AiChatPage() {
       if (!msg || loading) return;
 
       const userMessage: Message = { role: "user", content: msg };
-      setMessages((prev) => [...prev, userMessage]);
+      const updatedMessages = [...messages, userMessage];
+      setMessages(updatedMessages);
       setInput("");
       setLoading(true);
 
       try {
         if (token) setApiToken(token);
-        const response = await sendAiMessage(msg);
 
-        // Extract reply from any response format
+        const history: ChatHistory[] = updatedMessages.map(m => ({
+          role: m.role === "ai" ? "assistant" : "user",
+          content: m.content,
+        }));
+
+        const res = await fetch("/api/ai/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ message: msg, history }),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText || `Server error: ${res.status}`);
+        }
+
+        const data = await res.json();
+
         let replyText = "";
-
-        if (typeof response === "string") {
-          replyText = response;
-        } else if (response && typeof response === "object") {
-          const r = response as Record<string, unknown>;
+        if (typeof data === "string") {
+          replyText = data;
+        } else if (data && typeof data === "object") {
+          const r = data as Record<string, unknown>;
           replyText =
             (typeof r.reply === "string" ? r.reply : null) ||
             (typeof r.content === "string" ? r.content : null) ||
-            (typeof r.message === "string" ? r.message : null) ||
-            (typeof r.text === "string" ? r.text : null) ||
             "";
         }
+        if (!replyText) replyText = "AI returned an empty response.";
 
-        // Last resort: stringify
-        if (!replyText && response) {
-          try {
-            replyText = JSON.stringify(response, null, 2);
-          } catch {
-            replyText = String(response);
-          }
-        }
+        const toolCalls: string[] | undefined = data?.toolCalls as string[];
 
-        if (!replyText || replyText.trim() === "") {
-          replyText = "AI returned an empty response. Please check your AI provider settings in Settings → AI Assistant.";
-        }
-
-        setMessages((prev) => [...prev, { role: "ai", content: replyText }]);
+        setMessages((prev) => [...prev, { role: "ai", content: replyText, toolCalls }]);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "Unknown error";
         setMessages((prev) => [
@@ -86,7 +99,7 @@ export default function AiChatPage() {
         setLoading(false);
       }
     },
-    [input, loading, token],
+    [input, loading, token, messages],
   );
 
   return (
@@ -140,6 +153,16 @@ export default function AiChatPage() {
               )}
 
               <div className="max-w-[85%] min-w-0">
+                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {msg.toolCalls.map((tc, idx) => (
+                      <span key={idx} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                        <Wrench className="h-2.5 w-2.5" />
+                        {tc}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div
                   className={`rounded-xl px-4 py-3 ${
                     msg.role === "user"
