@@ -184,6 +184,7 @@ const AssetDetailPage = () => {
 
   const visibleTabs = tabs.filter((t) => !t.adminOnly || isAdmin);
 
+  const isDriveLetterOnly = asset.disk_model && asset.disk_model.includes(":");
   const healthPct = asset.disk_health_percent != null ? Math.round(asset.disk_health_percent) : null;
   const healthColor = healthPct != null
     ? healthPct >= 90 ? "text-emerald-500" : healthPct >= 70 ? "text-amber-500" : "text-red-500"
