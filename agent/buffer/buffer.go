@@ -7,15 +7,13 @@ import (
 	"sync"
 )
 
-// WriteBuffer stores heartbeat payloads in memory and on disk for offline buffering
 type WriteBuffer struct {
-	mu       sync.Mutex
-	items    []client.HeartbeatPayload
-	filePath string
+	mu        sync.Mutex
+	items     []client.HeartbeatPayload
+	filePath  string
 	serverURL string
 }
 
-// NewWriteBuffer creates a new buffer with disk persistence
 func NewWriteBuffer(serverURL string) *WriteBuffer {
 	filePath := "pulse-buffer.jsonl"
 	b := &WriteBuffer{
@@ -31,11 +29,18 @@ func (b *WriteBuffer) loadFromDisk() {
 	if err != nil {
 		return
 	}
-	lines := json.RawMessage{}
-	_ = json.Unmarshal(data, &lines)
+	lines := splitLines(string(data))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var payload client.HeartbeatPayload
+		if err := json.Unmarshal([]byte(line), &payload); err == nil {
+			b.items = append(b.items, payload)
+		}
+	}
 }
 
-// Push adds a heartbeat to the buffer
 func (b *WriteBuffer) Push(payload client.HeartbeatPayload) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -43,8 +48,7 @@ func (b *WriteBuffer) Push(payload client.HeartbeatPayload) {
 	_ = b.persist()
 }
 
-// FlushTo sends all buffered heartbeats through the provided function
-func (b *WriteBuffer) FlushTo(sendFn func(collector.MetricsData, collector.NetworkInfo, *collector.LocationData) error) {
+func (b *WriteBuffer) FlushTo(sendFn func(client.HeartbeatPayload) error) {
 	b.mu.Lock()
 	items := b.items
 	b.items = nil
@@ -52,13 +56,21 @@ func (b *WriteBuffer) FlushTo(sendFn func(collector.MetricsData, collector.Netwo
 
 	_ = b.persist()
 
+	var failed []client.HeartbeatPayload
 	for _, item := range items {
-		// We need to import collector here - let's fix this with a type alias
-		_ = item
+		if err := sendFn(item); err != nil {
+			failed = append(failed, item)
+		}
+	}
+
+	if len(failed) > 0 {
+		b.mu.Lock()
+		b.items = append(failed, b.items...)
+		b.mu.Unlock()
+		_ = b.persist()
 	}
 }
 
-// Count returns the number of buffered items
 func (b *WriteBuffer) Count() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -66,5 +78,28 @@ func (b *WriteBuffer) Count() int {
 }
 
 func (b *WriteBuffer) persist() error {
-	return nil
+	var lines string
+	for _, item := range b.items {
+		data, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		lines += string(data) + "\n"
+	}
+	return os.WriteFile(b.filePath, []byte(lines), 0644)
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
 }

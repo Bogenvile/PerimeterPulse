@@ -1,12 +1,13 @@
 package collector
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"os"
 	"strings"
 )
 
-// CollectSystemInfo gathers hostname and MAC addresses.
 func CollectSystemInfo() SystemInfo {
 	hostname, _ := os.Hostname()
 
@@ -28,6 +29,15 @@ func CollectSystemInfo() SystemInfo {
 		Hostname:     cleanHostname(hostname),
 		MacAddresses: macs,
 	}
+}
+
+func GenerateAgentID(hostname string, macs []string) string {
+	h := sha256.New()
+	h.Write([]byte(hostname))
+	for _, mac := range macs {
+		h.Write([]byte(mac))
+	}
+	return "agent-" + hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 func cleanHostname(h string) string {

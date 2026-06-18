@@ -272,12 +272,21 @@ export default defineHandler(async (event) => {
       "wifi_signal_dbm=COALESCE(?, wifi_signal_dbm)",
       "network_speed_mbps=COALESCE(?, COALESCE(network_speed_mbps, 0))",
       "ip_addresses=COALESCE(?, ip_addresses)",
+      "cpu_model=COALESCE(NULLIF(?, ''), cpu_model)",
+      "cpu_cores=COALESCE(NULLIF(?, 0), cpu_cores)",
+      "ram_total_bytes=COALESCE(NULLIF(?, 0), ram_total_bytes)",
+      "storage_total_bytes=COALESCE(NULLIF(?, 0), storage_total_bytes)",
+      "disk_model=COALESCE(NULLIF(?, ''), disk_model)",
+      "disk_type=COALESCE(NULLIF(?, ''), disk_type)",
     );
     updateValues.push(
       safeMetrics.disk_health_status, safeMetrics.disk_temperature_c,
       n.wifi_ssid || null, n.wifi_signal_dbm ?? null,
       n.network_speed_mbps ?? null,
       JSON.stringify(filterIPv4(n.ip_addresses || [])),
+      m.cpu_model || null, m.cpu_cores || null,
+      m.ram_total_bytes || null, m.storage_total_bytes || null,
+      m.disk_model || null, m.disk_type || null,
     );
 
     if (await columnExists("assets", "wifi_ip")) {

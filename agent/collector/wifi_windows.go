@@ -7,11 +7,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
-	"unsafe"
 )
 
-// WiFiInfo holds wireless network details
 type WiFiInfo struct {
 	SSID      string
 	SignalDBM int
@@ -20,7 +17,6 @@ type WiFiInfo struct {
 	Gateway   string
 }
 
-// GetWiFiInfo retrieves WiFi information using netsh on Windows
 func GetWiFiInfo() WiFiInfo {
 	info := WiFiInfo{SignalDBM: -999}
 
@@ -92,11 +88,9 @@ func GetWiFiInfo() WiFiInfo {
 	return info
 }
 
-// detectCPU returns CPU model and core count via PowerShell
 func detectCPU() (model string, cores int) {
-	cmd := exec.Command("powershell", "-Command",
-		"Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name -First 1")
-	out, err := cmd.Output()
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name -First 1").Output()
 	if err == nil {
 		model = strings.TrimSpace(string(out))
 	}
@@ -104,9 +98,8 @@ func detectCPU() (model string, cores int) {
 		model = "Unknown"
 	}
 
-	cmd2 := exec.Command("powershell", "-Command",
-		"(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors")
-	out2, err := cmd2.Output()
+	out2, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors").Output()
 	if err == nil {
 		if c, e := strconv.Atoi(strings.TrimSpace(string(out2))); e == nil && c > 0 {
 			cores = c
@@ -118,31 +111,94 @@ func detectCPU() (model string, cores int) {
 	return
 }
 
-// getTotalRAM returns total RAM via kernel32 GlobalMemoryStatusEx
-func getTotalRAM() uint64 {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	proc := kernel32.NewProc("GlobalMemoryStatusEx")
-	var buf [64]byte
-	buf[0] = 64
-	proc.Call(uintptr(unsafe.Pointer(&buf[0])))
-	return *(*uint64)(unsafe.Pointer(&buf[8]))
+func detectRAM() (totalBytes, usedBytes uint64) {
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"$os=Get-CimInstance Win32_OperatingSystem; Write-Output \"$($os.TotalVisibleMemorySize)|$($os.FreePhysicalMemory)\"").Output()
+	if err == nil {
+		parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+		if len(parts) == 2 {
+			if totalKB, e := strconv.ParseUint(parts[0], 10, 64); e == nil {
+				totalBytes = totalKB * 1024
+			}
+			if freeKB, e := strconv.ParseUint(parts[1], 10, 64); e == nil {
+				usedBytes = totalBytes - (freeKB * 1024)
+			}
+		}
+	}
+	return
 }
 
-// getUsedRAM returns used RAM via kernel32 GlobalMemoryStatusEx
-func getUsedRAM() uint64 {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	proc := kernel32.NewProc("GlobalMemoryStatusEx")
-	var buf [64]byte
-	buf[0] = 64
-	proc.Call(uintptr(unsafe.Pointer(&buf[0])))
-	total := *(*uint64)(unsafe.Pointer(&buf[8]))
-	avail := *(*uint64)(unsafe.Pointer(&buf[16]))
-	return total - avail
+func detectDiskUsage() (pct float64, used, total uint64) {
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"$d=Get-PSDrive C; Write-Output \"$($d.Used)|$($d.Free)\"").Output()
+	if err == nil {
+		parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+		if len(parts) == 2 {
+			if u, e := strconv.ParseUint(parts[0], 10, 64); e == nil {
+				used = u
+			}
+			if f, e := strconv.ParseUint(parts[1], 10, 64); e == nil {
+				total = used + f
+			}
+		}
+	}
+	if total > 0 {
+		pct = float64(used) / float64(total) * 100
+	}
+	return
 }
 
-// getLocalIPs returns all non-loopback IPv4 addresses
+func detectDiskInfo() (diskType, diskModel, diskHealth string, diskTemp float64) {
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"$d=Get-CimInstance Win32_DiskDrive | Select-Object -First 1; if($d){Write-Output \"$($d.Model)|$($d.MediaType)\"}else{Write-Output '|'}").Output()
+	if err == nil {
+		trimmed := strings.TrimSpace(string(out))
+		parts := strings.SplitN(trimmed, "|", 2)
+		if len(parts) >= 1 && parts[0] != "" {
+			diskModel = parts[0]
+		}
+		if len(parts) >= 2 {
+			mt := strings.ToLower(strings.TrimSpace(parts[1]))
+			switch {
+			case strings.Contains(mt, "ssd") || strings.Contains(mt, "solid state"):
+				diskType = "ssd"
+			case strings.Contains(mt, "nvme"):
+				diskType = "nvme"
+			case mt == "fixed hard disk media" || mt == "external hard disk media":
+				if strings.Contains(strings.ToUpper(diskModel), "SSD") ||
+					strings.Contains(strings.ToUpper(diskModel), "NVME") ||
+					strings.Contains(strings.ToUpper(diskModel), "SSDP") {
+					diskType = "ssd"
+				} else {
+					diskType = "hdd"
+				}
+			case mt != "":
+				diskType = mt
+			default:
+				diskType = "unknown"
+			}
+		}
+	}
+
+	out2, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"$d=Get-PhysicalDisk | Select-Object -First 1; if($d -and $d.HealthStatus){Write-Output $d.HealthStatus}else{Write-Output 'unknown'}").Output()
+	if err == nil {
+		h := strings.ToLower(strings.TrimSpace(string(out2)))
+		if h != "" && h != "unknown" {
+			diskHealth = h
+		}
+	}
+	if diskHealth == "" {
+		diskHealth = "unknown"
+	}
+	if diskType == "" {
+		diskType = "unknown"
+	}
+	return
+}
+
 func getLocalIPs() []string {
-	cmd := exec.Command("powershell", "-Command",
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*'}).IPAddress")
 	out, err := cmd.Output()
 	if err != nil {
@@ -151,25 +207,19 @@ func getLocalIPs() []string {
 	var ips []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ip := strings.TrimSpace(line)
-		if ip != "" {
+		if ip != "" && !isVirtualAdapterIP(ip) {
 			ips = append(ips, ip)
 		}
 	}
 	return ips
 }
 
-// getDefaultGatewayForInterface returns the default gateway for a given interface index
 func getDefaultGatewayForInterface(idx int) string {
-	cmd := exec.Command("powershell", "-Command",
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		fmt.Sprintf("(Get-NetRoute -InterfaceIndex %d -DestinationPrefix '0.0.0.0/0').NextHop", idx))
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func init() {
-	fmt.Print("") // suppress unused import warning
-	_ = unsafe.Sizeof(0)
 }

@@ -59,6 +59,12 @@ func main() {
 			network := collector.CollectNetworkInfo()
 			location := collector.CollectLocation()
 
+			log.Printf("CPU: %s (%d cores) | RAM: %d/%d (%.1f%%) | Disk: %d/%d (%.1f%%) | DiskModel: %s Type: %s Health: %s",
+				metrics.CPUModel, metrics.CPUCores,
+				metrics.RAMUsedBytes, metrics.RAMTotalBytes, metrics.RAMPerecent,
+				metrics.StorageUsedBytes, metrics.StorageTotalBytes, metrics.StoragePercent,
+				metrics.DiskModel, metrics.DiskType, metrics.DiskHealthStatus)
+
 			if err := apiClient.SendHeartbeat(agentID, metrics, network, location); err != nil {
 				log.Printf("Heartbeat failed: %v\n", err)
 			} else {
