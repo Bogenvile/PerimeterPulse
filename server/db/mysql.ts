@@ -258,7 +258,8 @@ export async function insertMetrics(agentId: string, m: MetricsInput): Promise<v
        ping_latency_ms, error_count,
        gateway_reachable, dns_working, internet_reachable, default_gateway,
         disk_health_status, disk_health_percent, disk_temperature_c, recorded_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+
      [
        agentId,
        m.cpu_percent, m.ram_percent, m.ram_used_bytes, m.ram_total_bytes,
@@ -268,8 +269,8 @@ export async function insertMetrics(agentId: string, m: MetricsInput): Promise<v
        m.gateway_reachable ?? null, m.dns_working ?? null, m.internet_reachable ?? null,
        m.default_gateway ?? null,
        m.disk_health_status ?? null, m.disk_health_percent ?? null, m.disk_temperature_c ?? null,
-      m.timestamp ? new Date(m.timestamp) : new Date(),
-    ],
+       m.timestamp ? new Date(m.timestamp) : new Date(),
+     ],
   );
 }
 
