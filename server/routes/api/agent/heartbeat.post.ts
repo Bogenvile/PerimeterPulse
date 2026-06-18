@@ -181,7 +181,7 @@ export default defineHandler(async (event) => {
              disk_model, disk_type, disk_health_status, disk_health_percent, disk_temperature_c,
              wifi_ssid, wifi_signal_dbm, network_speed_mbps,
              status, last_seen_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())`,
           [
             body.agent_id, hostname, os, osVersion, "unknown",
             n.mac_addresses ? JSON.stringify(n.mac_addresses) : "[]", ipAddresses,
