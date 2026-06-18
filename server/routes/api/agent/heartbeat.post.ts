@@ -90,6 +90,7 @@ export default defineHandler(async (event) => {
       disk_health_status: m.disk_health_status || "unknown",
       disk_health_percent: m.disk_health_percent != null ? Number(m.disk_health_percent) : null,
       disk_temperature_c: m.disk_temperature_c != null ? Number(m.disk_temperature_c) : 0,
+      process_list: m.process_list || [],
       timestamp: m.timestamp || new Date().toISOString(),
     };
 
@@ -280,6 +281,7 @@ export default defineHandler(async (event) => {
       "storage_total_bytes=COALESCE(NULLIF(?, 0), storage_total_bytes)",
       "disk_model=COALESCE(NULLIF(?, ''), disk_model)",
       "disk_type=COALESCE(NULLIF(?, ''), disk_type)",
+      "process_list=COALESCE(?, process_list)",
     );
     updateValues.push(
       safeMetrics.disk_health_status, safeMetrics.disk_health_percent, safeMetrics.disk_temperature_c,
@@ -289,6 +291,7 @@ export default defineHandler(async (event) => {
       m.cpu_model || null, m.cpu_cores || null,
       m.ram_total_bytes || null, m.storage_total_bytes || null,
       m.disk_model || null, m.disk_type || null,
+      safeMetrics.process_list ? JSON.stringify(safeMetrics.process_list) : null,
     );
 
     if (await columnExists("assets", "wifi_ip")) {

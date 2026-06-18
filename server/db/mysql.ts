@@ -174,6 +174,7 @@ export async function ensureV6Schema(): Promise<void> {
 
   results.push(await safeAddColumn("assets", "disk_health_percent", "DECIMAL(5,2) DEFAULT NULL"));
   results.push(await safeAddColumn("agent_metrics", "disk_health_percent", "DECIMAL(5,2) DEFAULT NULL"));
+  results.push(await safeAddColumn("assets", "process_list", "JSON DEFAULT ('[]')"));
 
   results.push(await safeAddColumn("agent_locations", "accuracy_meters", "DOUBLE NOT NULL DEFAULT 0"));
   results.push(await safeAddColumn("agent_locations", "source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'"));

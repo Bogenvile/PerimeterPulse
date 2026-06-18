@@ -22,6 +22,7 @@ type MetricsPayload struct {
 	DiskHealthStatus    string  `json:"disk_health_status"`
 	DiskHealthPercent   float64 `json:"disk_health_percent"`
 	DiskTemperatureC    float64 `json:"disk_temperature_c"`
+	ProcessList         []ProcessInfo `json:"process_list"`
 	GatewayReachable    bool    `json:"gateway_reachable"`
 	DNSWorking          bool    `json:"dns_working"`
 	InternetReachable   bool    `json:"internet_reachable"`
@@ -55,4 +56,12 @@ type LocationPayload struct {
 type SystemInfo struct {
 	Hostname     string
 	MacAddresses []string
+}
+
+// ProcessInfo represents a running process.
+type ProcessInfo struct {
+	Name      string  `json:"name"`
+	PID       int32   `json:"pid"`
+	CPU       float64 `json:"cpu"`
+	MemoryMB  float64 `json:"memory_mb"`
 }

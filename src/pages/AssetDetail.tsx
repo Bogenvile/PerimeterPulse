@@ -305,6 +305,37 @@ const AssetDetailPage = () => {
         />
       </div>
 
+      {/* Top Processes */}
+      {asset.process_list && asset.process_list.length > 0 && (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">Top Processes</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left px-5 py-2 font-medium">Name</th>
+                  <th className="text-right px-3 py-2 font-medium">PID</th>
+                  <th className="text-right px-3 py-2 font-medium">CPU</th>
+                  <th className="text-right px-5 py-2 font-medium">Memory</th>
+                </tr>
+              </thead>
+              <tbody>
+                {asset.process_list.map((p, i) => (
+                  <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/50">
+                    <td className="px-5 py-1.5 font-mono">{p.name}</td>
+                    <td className="text-right px-3 py-1.5 text-muted-foreground">{p.pid}</td>
+                    <td className="text-right px-3 py-1.5">{p.cpu.toFixed(1)}s</td>
+                    <td className="text-right px-5 py-1.5">{p.memory_mb.toFixed(0)} MB</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Error Logs Card */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4">

@@ -7,9 +7,10 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"perimeterpulse-agent/commands"
 )
 
-// Client communicates with the PerimeterPulse server.
 type Client struct {
 	serverURL string
 	apiKey    string
@@ -17,7 +18,6 @@ type Client struct {
 	http      *http.Client
 }
 
-// NewClient creates a new API client. hostname is sent with every heartbeat.
 func NewClient(serverURL, apiKey, hostname string) *Client {
 	return &Client{
 		serverURL: serverURL,
@@ -29,7 +29,6 @@ func NewClient(serverURL, apiKey, hostname string) *Client {
 	}
 }
 
-// HeartbeatPayload is the JSON body sent to /api/agent/heartbeat.
 type HeartbeatPayload struct {
 	AgentID     string `json:"agent_id"`
 	APIKey      string `json:"api_key"`
@@ -39,7 +38,6 @@ type HeartbeatPayload struct {
 	NetworkInfo any    `json:"network_info"`
 }
 
-// SendHeartbeat sends metrics, network, and location data to the server.
 func (c *Client) SendHeartbeat(agentID string, metrics, network, location any) error {
 	payload := HeartbeatPayload{
 		AgentID:     agentID,
@@ -70,5 +68,89 @@ func (c *Client) SendHeartbeat(agentID string, metrics, network, location any) e
 		return fmt.Errorf("heartbeat rejected (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
 
+	return nil
+}
+
+type CommandInfo struct {
+	ID        int    `json:"id"`
+	Command   string `json:"command"`
+	CreatedAt string `json:"created_at"`
+}
+
+type FetchCommandsResponse struct {
+	Commands []CommandInfo `json:"commands"`
+}
+
+func (c *Client) FetchCommands(agentID string) ([]CommandInfo, error) {
+	url := fmt.Sprintf("%s/api/agent/commands?agent_id=%s&api_key=%s",
+		c.serverURL, agentID, c.apiKey)
+
+	resp, err := c.http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch commands: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("fetch commands rejected (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result FetchCommandsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode commands: %w", err)
+	}
+	return result.Commands, nil
+}
+
+type commandReport struct {
+	AgentID  string `json:"agent_id"`
+	APIKey   string `json:"api_key"`
+	Action   string `json:"action"`
+	Output   string `json:"output,omitempty"`
+	Error    string `json:"error,omitempty"`
+	ExitCode int    `json:"exit_code,omitempty"`
+}
+
+func (c *Client) ReportCommandStart(agentID string, commandID int) error {
+	return c.reportCommand(agentID, commandID, "start", nil)
+}
+
+func (c *Client) ReportCommandResult(agentID string, commandID int, result commands.ExecResult) error {
+	action := "complete"
+	if result.ExitCode != 0 {
+		action = "fail"
+	}
+	return c.reportCommand(agentID, commandID, action, &result)
+}
+
+func (c *Client) reportCommand(agentID string, commandID int, action string, result *commands.ExecResult) error {
+	report := commandReport{
+		AgentID: agentID,
+		APIKey:  c.apiKey,
+		Action:  action,
+	}
+	if result != nil {
+		report.Output = result.Output
+		report.Error = result.Error
+		report.ExitCode = result.ExitCode
+	}
+
+	body, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("marshal command report: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/api/agent/commands/%d", c.serverURL, commandID)
+	resp, err := c.http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("report command: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("command report rejected (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
 	return nil
 }

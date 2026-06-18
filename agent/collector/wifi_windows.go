@@ -209,6 +209,31 @@ func detectDiskHealthPercent() float64 {
 	return 100
 }
 
+func collectProcessList() []ProcessInfo {
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 | ForEach-Object { Write-Output \"$($_.Name)|$($_.Id)|$($_.CPU)|$([math]::Round($_.WorkingSet64/1MB,1))\" }").Output()
+	if err != nil {
+		return nil
+	}
+	var result []ProcessInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), "|", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		pid, _ := strconv.Atoi(parts[1])
+		cpu, _ := strconv.ParseFloat(parts[2], 64)
+		mem, _ := strconv.ParseFloat(parts[3], 64)
+		result = append(result, ProcessInfo{
+			Name:     parts[0],
+			PID:      int32(pid),
+			CPU:      cpu,
+			MemoryMB: mem,
+		})
+	}
+	return result
+}
+
 func getLocalIPs() []string {
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*'}).IPAddress")

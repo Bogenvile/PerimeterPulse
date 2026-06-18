@@ -11,9 +11,10 @@ import (
 
 	"perimeterpulse-agent/client"
 	"perimeterpulse-agent/collector"
+	"perimeterpulse-agent/commands"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	serverURL := flag.String("server", "", "PerimeterPulse server URL (required)")
@@ -49,6 +50,9 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	commandDone := make(chan struct{}, 1)
+	commandDone <- struct{}{}
+
 	ticker := time.NewTicker(intervalDuration)
 	defer ticker.Stop()
 
@@ -71,9 +75,47 @@ func main() {
 				log.Println("Heartbeat sent successfully")
 			}
 
+			select {
+			case <-commandDone:
+				go pollAndExecute(apiClient, agentID, commandDone)
+			default:
+			}
+
 		case <-sigCh:
 			log.Println("Shutting down...")
 			return
+		}
+	}
+}
+
+func pollAndExecute(c *client.Client, agentID string, done chan<- struct{}) {
+	defer func() { done <- struct{}{} }()
+
+	cmds, err := c.FetchCommands(agentID)
+	if err != nil {
+		log.Printf("Command poll failed: %v", err)
+		return
+	}
+
+	if len(cmds) == 0 {
+		return
+	}
+
+	log.Printf("Fetched %d pending command(s)", len(cmds))
+
+	for _, cmd := range cmds {
+		log.Printf("Executing command #%d: %s", cmd.ID, cmd.Command)
+
+		if err := c.ReportCommandStart(agentID, cmd.ID); err != nil {
+			log.Printf("Failed to report start for #%d: %v", cmd.ID, err)
+			continue
+		}
+
+		result := commands.Execute(cmd.Command)
+		log.Printf("Command #%d done (exit=%d, output=%d bytes)", cmd.ID, result.ExitCode, len(result.Output))
+
+		if err := c.ReportCommandResult(agentID, cmd.ID, result); err != nil {
+			log.Printf("Failed to report result for #%d: %v", cmd.ID, err)
 		}
 	}
 }

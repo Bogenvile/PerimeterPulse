@@ -102,6 +102,7 @@ export interface ExtendedAsset {
   disk_health_status: string;
   disk_health_percent: number | null;
   disk_temperature_c: number | null;
+  process_list: ProcessInfo[];
   wifi_ssid: string;
   wifi_signal_dbm: number | null;
   wifi_ip: string;
@@ -174,6 +175,13 @@ export interface ApiKeyInfo {
 // ──── Remote Command Types ────
 
 export type CommandStatus = "pending" | "running" | "completed" | "failed" | "timeout";
+
+export interface ProcessInfo {
+  name: string;
+  pid: number;
+  cpu: number;
+  memory_mb: number;
+}
 
 export interface AgentCommand {
   id: number;
