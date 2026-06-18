@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"perimeterpulse-agent/collector"
 	"perimeterpulse-agent/commands"
 )
+
+var buildVersion = "1.1.0"
 
 const version = "1.1.0"
 
@@ -46,6 +49,8 @@ func main() {
 
 	intervalDuration := time.Duration(*interval) * time.Second
 	log.Printf("Heartbeat interval: %s. Agent running.\n", intervalDuration)
+
+	go updateLoop(apiClient, agentID)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -117,5 +122,53 @@ func pollAndExecute(c *client.Client, agentID string, done chan<- struct{}) {
 		if err := c.ReportCommandResult(agentID, cmd.ID, result); err != nil {
 			log.Printf("Failed to report result for #%d: %v", cmd.ID, err)
 		}
+	}
+}
+
+func currentVersion() string {
+	if buildVersion != "" && buildVersion != "1.1.0" {
+		return buildVersion
+	}
+	return version
+}
+
+func getAgentOS() string {
+	if runtime.GOOS == "windows" {
+		return "windows"
+	}
+	return "linux"
+}
+
+func updateLoop(c *client.Client, agentID string) {
+	for {
+		time.Sleep(5 * time.Minute)
+
+		newVer, downloadURL, err := c.CheckUpdate(agentID, currentVersion(), getAgentOS())
+		if err != nil {
+			log.Printf("Update check failed: %v", err)
+			continue
+		}
+		if newVer == "" {
+			continue
+		}
+
+		log.Printf("New version available: %s (current: %s)", newVer, currentVersion())
+		log.Printf("Downloading update from %s", downloadURL)
+
+		tmpFile, err := c.DownloadUpdate(downloadURL)
+		if err != nil {
+			log.Printf("Download failed: %v", err)
+			continue
+		}
+
+		log.Printf("Downloaded %s. Replacing and restarting...", newVer)
+
+		if err := selfReplace(tmpFile, os.Args[1:]); err != nil {
+			log.Printf("Self-replace failed: %v", err)
+			continue
+		}
+
+		log.Println("Update staged. Exiting for restart...")
+		os.Exit(0)
 	}
 }

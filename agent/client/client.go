@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"perimeterpulse-agent/commands"
@@ -153,4 +154,61 @@ func (c *Client) reportCommand(agentID string, commandID int, action string, res
 		return fmt.Errorf("command report rejected (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
 	return nil
+}
+
+type UpdateResponse struct {
+	Version     string `json:"version"`
+	DownloadURL string `json:"download_url"`
+}
+
+func (c *Client) CheckUpdate(agentID string, currentVersion string, currentOS string) (string, string, error) {
+	url := fmt.Sprintf("%s/api/agent/update?agent_id=%s&api_key=%s&os=%s",
+		c.serverURL, agentID, c.apiKey, currentOS)
+
+	resp, err := c.http.Get(url)
+	if err != nil {
+		return "", "", fmt.Errorf("check update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", "", fmt.Errorf("check update rejected (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var update UpdateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&update); err != nil {
+		return "", "", fmt.Errorf("decode update: %w", err)
+	}
+
+	if update.Version == "" || update.DownloadURL == "" {
+		return "", "", nil
+	}
+
+	return update.Version, update.DownloadURL, nil
+}
+
+func (c *Client) DownloadUpdate(downloadURL string) (string, error) {
+	resp, err := c.http.Get(downloadURL)
+	if err != nil {
+		return "", fmt.Errorf("download update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("download update rejected (HTTP %d)", resp.StatusCode)
+	}
+
+	tmpFile, err := os.CreateTemp("", "pulse-agent-update-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("write update: %w", err)
+	}
+
+	return tmpFile.Name(), nil
 }
