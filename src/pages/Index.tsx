@@ -60,6 +60,9 @@ const Index = () => {
     critical_count: effectiveAssets.filter((a) => a.status === "critical").length,
     avg_cpu_percent: 0,
     avg_ram_percent: 0,
+    avg_disk_health: assets.length > 0
+      ? assets.reduce((sum, a) => sum + (a.disk_health_percent ?? 100), 0) / assets.length
+      : 100,
     disk_issues: assets.filter(
       (a) => a.disk_health_status === "warning" || a.disk_health_status === "critical",
     ).length,

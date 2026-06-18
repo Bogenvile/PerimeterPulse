@@ -68,6 +68,14 @@ const cards = [
     iconBg: "bg-red-50",
     iconColor: "text-red-500",
   },
+  {
+    key: "disk_health",
+    label: "Avg Disk Health",
+    getValue: (s: DashboardStats) => s.avg_disk_health ? `${s.avg_disk_health.toFixed(0)}%` : "N/A",
+    icon: Disc,
+    iconBg: "bg-emerald-50",
+    iconColor: "text-emerald-600",
+  },
 ];
 
 export function StatsCards({ stats }: StatsCardsProps) {

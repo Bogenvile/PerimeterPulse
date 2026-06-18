@@ -150,6 +150,7 @@ export interface DashboardStats {
   critical_count: number;
   avg_cpu_percent: number;
   avg_ram_percent: number;
+  avg_disk_health: number;
   disk_issues: number;
 }
 

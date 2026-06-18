@@ -1,4 +1,4 @@
-import { Cpu, HardDrive, Clock, Users, Globe, Activity } from "lucide-react";
+import { Cpu, HardDrive, Disc, Users, Globe, Activity } from "lucide-react";
 import type { ExtendedAsset, DashboardStats } from "@/lib/types";
 
 interface SystemOverviewCardsProps {
@@ -51,7 +51,7 @@ const items = [
   },
   {
     label: "Disk Issues",
-    icon: Clock,
+    icon: Disc,
     getValue: (stats: DashboardStats) => stats.disk_issues,
     sublabel: "warning or critical",
     iconBg: "bg-amber-50",
