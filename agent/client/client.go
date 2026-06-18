@@ -185,7 +185,34 @@ func (c *Client) CheckUpdate(agentID string, currentVersion string, currentOS st
 		return "", "", nil
 	}
 
+	if compareVersion(update.Version, currentVersion) <= 0 {
+		return "", "", nil
+	}
+
 	return update.Version, update.DownloadURL, nil
+}
+
+func compareVersion(a, b string) int {
+	partsA := splitVersion(a)
+	partsB := splitVersion(b)
+	for i := 0; i < 3; i++ {
+		if partsA[i] > partsB[i] {
+			return 1
+		}
+		if partsA[i] < partsB[i] {
+			return -1
+		}
+	}
+	return 0
+}
+
+func splitVersion(v string) [3]int {
+	var parts [3]int
+	n, _ := fmt.Sscanf(v, "%d.%d.%d", &parts[0], &parts[1], &parts[2])
+	if n < 1 {
+		parts[0] = 0
+	}
+	return parts
 }
 
 func (c *Client) DownloadUpdate(downloadURL string) (string, error) {
