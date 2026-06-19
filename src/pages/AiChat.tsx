@@ -3,12 +3,14 @@ import { Loader2, Bot, User, Sparkles, Send, AlertCircle, Copy, Check, Wrench } 
 import { useAuth } from "@/lib/auth";
 import { setApiToken } from "@/lib/api";
 import { AiMarkdown } from "@/components/AiMarkdown";
+import { ChartRenderer, type ChartSpec } from "@/components/ChartRenderer";
 
 interface Message {
   role: "user" | "ai";
   content: string;
   isError?: boolean;
   toolCalls?: string[];
+  charts?: ChartSpec[];
 }
 
 interface ChatHistory {
@@ -87,8 +89,9 @@ export default function AiChatPage() {
         if (!replyText) replyText = "AI returned an empty response.";
 
         const toolCalls: string[] | undefined = data?.toolCalls as string[];
+        const charts: ChartSpec[] | undefined = data?.charts as ChartSpec[];
 
-        setMessages((prev) => [...prev, { role: "ai", content: replyText, toolCalls }]);
+        setMessages((prev) => [...prev, { role: "ai", content: replyText, toolCalls, charts }]);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "Unknown error";
         setMessages((prev) => [
@@ -160,6 +163,13 @@ export default function AiChatPage() {
                         <Wrench className="h-2.5 w-2.5" />
                         {tc}
                       </span>
+                    ))}
+                  </div>
+                )}
+                {msg.charts && msg.charts.length > 0 && (
+                  <div className="mb-3 space-y-3">
+                    {msg.charts.map((chart, idx) => (
+                      <ChartRenderer key={idx} spec={chart} />
                     ))}
                   </div>
                 )}

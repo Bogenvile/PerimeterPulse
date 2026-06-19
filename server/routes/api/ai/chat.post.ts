@@ -48,6 +48,34 @@ const tools = [
         required: ["hostname"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_chart",
+      description: "Generate a chart or graph to visualize data. Use this when the user asks for charts, graphs, or visual data representation. Supports bar, line, pie, and area charts. Call this tool and the chart will render directly in the chat.",
+      parameters: {
+        type: "object",
+        properties: {
+          chart_type: { type: "string", enum: ["bar", "line", "pie", "area"], description: "Type of chart to generate" },
+          title: { type: "string", description: "Chart title displayed above the chart" },
+          labels: { type: "array", items: { type: "string" }, description: "X-axis labels (for bar/line/area) or slice labels (for pie)" },
+          datasets: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string", description: "Dataset label shown in legend/tooltip" },
+                data: { type: "array", items: { type: "number" }, description: "Numeric data values, one per label" },
+                color: { type: "string", description: "Hex color for this dataset, e.g. #3699FF" }
+              },
+              required: ["label", "data"]
+            }
+          }
+        },
+        required: ["chart_type", "title", "labels", "datasets"]
+      }
+    }
   }
 ];
 
@@ -63,6 +91,7 @@ You have full access to real-time monitoring data and can execute commands on re
 3. **View command history** — Use get_command_history to see past commands
 4. **Analyze issues** — Identify problems and suggest fixes based on data
 5. **Monitor health** — Track disk health, CPU/RAM usage, network status
+6. **Generate charts** — Use generate_chart to create bar, line, pie, or area charts. When a user asks to visualize data, compare metrics, or see trends, call this tool with the appropriate chart type and data. Charts render directly in the chat.
 
 ## Guidelines
 - Be concise and technical. Use bullet points for multiple items.
@@ -109,6 +138,7 @@ export default defineHandler(async (event) => {
     let response = await callLLM(endpoint, apiKey, model, messages, tools);
     let reply = "";
     const toolResults: string[] = [];
+    const charts: any[] = [];
 
     while (response?.tool_calls?.length > 0) {
       const toolCall = response.tool_calls[0];
@@ -120,6 +150,11 @@ export default defineHandler(async (event) => {
         toolResult = await executeTool(fn.name, args);
       } catch (err) {
         toolResult = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
+      }
+
+      if (toolResult.startsWith("__CHART__")) {
+        charts.push(JSON.parse(toolResult.slice(8)));
+        toolResult = "Chart has been generated and rendered.";
       }
 
       toolResults.push(`🔧 ${fn.name}(${JSON.stringify(args).slice(0, 80)})`);
@@ -144,7 +179,7 @@ export default defineHandler(async (event) => {
       throw new Error("AI provider returned empty response");
     }
 
-    return { reply, toolCalls: toolResults.length > 0 ? toolResults : undefined };
+    return { reply, toolCalls: toolResults.length > 0 ? toolResults : undefined, charts: charts.length > 0 ? charts : undefined };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error("[AI] Chat error:", msg);
@@ -217,6 +252,16 @@ async function executeTool(name: string, args: any): Promise<string> {
     return history.map((c: any) =>
       `#${c.id} | ${c.command} | ${c.status} | exit=${c.exit_code} | ${c.output ? c.output.slice(0, 200) : ""}`
     ).join("\n");
+  }
+
+  if (name === "generate_chart") {
+    const spec = {
+      chart_type: args.chart_type,
+      title: args.title,
+      labels: args.labels,
+      datasets: args.datasets,
+    };
+    return `__CHART__${JSON.stringify(spec)}`;
   }
 
   return `Unknown tool: ${name}`;
