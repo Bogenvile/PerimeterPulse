@@ -143,7 +143,7 @@ export default defineHandler(async (event) => {
     while (response?.tool_calls?.length > 0) {
       const toolCall = response.tool_calls[0];
       const fn = toolCall.function;
-      const args = JSON.parse(fn.arguments || "{}");
+      const args = safeJsonParse(fn.arguments, {});
 
       let toolResult = "";
       try {
@@ -153,7 +153,11 @@ export default defineHandler(async (event) => {
       }
 
       if (toolResult.startsWith("__CHART__")) {
-        charts.push(JSON.parse(toolResult.slice(8)));
+        try {
+          charts.push(JSON.parse(toolResult.slice(8)));
+        } catch {
+          console.error("[AI] Failed to parse chart JSON:", toolResult.slice(0, 200));
+        }
         toolResult = "Chart has been generated and rendered.";
       }
 
@@ -186,6 +190,18 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: msg });
   }
 });
+
+function safeJsonParse(raw: string, fallback: any = {}): any {
+  if (!raw || typeof raw !== "string") return fallback;
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("_") && cleaned.endsWith("_")) cleaned = cleaned.slice(1, -1);
+  cleaned = cleaned.replace(/^[^{[]*/, "").replace(/[^}\]]*$/, "");
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return fallback;
+  }
+}
 
 async function callLLM(endpoint: string, apiKey: string, model: string, messages: any[], tools?: any[]): Promise<any> {
   const body: any = { model, messages, temperature: 0.5, max_tokens: 1000 };
