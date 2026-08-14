@@ -1,7 +1,28 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { Radio, Lock, User, AlertCircle, Eye, EyeOff, Activity, Globe, Shield } from "lucide-react";
+import { Radio, Lock, User, AlertCircle, Eye, EyeOff, Activity, Globe, Shield, Database, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+
+interface InitStep {
+  name: string;
+  status: "ok" | "skipped" | "error";
+  detail?: string;
+}
+
+interface InitReport {
+  ok: boolean;
+  steps: InitStep[];
+  seeded_users: string[];
+  api_key?: string;
+  message: string;
+}
+
+interface DbStatus {
+  ok: boolean;
+  initialized: boolean;
+  missing_tables?: string[];
+  error?: string;
+}
 
 const LoginPage = () => {
   const { login, isAuthenticated } = useAuth();
@@ -12,10 +33,41 @@ const LoginPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [dbStatus, setDbStatus] = useState<"checking" | "needs-init" | "initialized">("checking");
+  const [initRunning, setInitRunning] = useState(false);
+  const [initError, setInitError] = useState("");
+  const [initResult, setInitResult] = useState<InitReport | null>(null);
 
   useEffect(() => {
     setMounted(true);
+    fetch("/api/db/status")
+      .then((r) => r.json())
+      .then((d: DbStatus) => setDbStatus(d.initialized ? "initialized" : "needs-init"))
+      .catch(() => setDbStatus("needs-init"));
   }, []);
+
+  async function handleInitDatabase() {
+    if (!window.confirm("Initialize the database now? This creates missing tables and only seeds default data if the tables are empty. Existing data is never removed.")) {
+      return;
+    }
+    setInitRunning(true);
+    setInitError("");
+    setInitResult(null);
+    try {
+      const res = await fetch("/api/db/init", { method: "POST" });
+      const data: InitReport = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.message || `Failed to initialize database (HTTP ${res.status})`);
+      }
+      setInitResult(data);
+      setDbStatus("initialized");
+    } catch (err) {
+      setInitError(err instanceof Error ? err.message : "Failed to initialize database");
+      setDbStatus("needs-init");
+    } finally {
+      setInitRunning(false);
+    }
+  }
 
   if (isAuthenticated) {
     navigate("/", { replace: true });
@@ -214,6 +266,98 @@ const LoginPage = () => {
                 )}
               </button>
             </form>
+
+            {/* Database initialization */}
+            {dbStatus !== "initialized" && (
+              <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4">
+                <div className="flex items-start gap-3">
+                  <Database className="mt-0.5 h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <div className="flex-1 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Initialize Database
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        First-time setup: creates missing tables and seeds default admin account. Existing data is preserved.
+                      </p>
+                    </div>
+
+                    {initError && (
+                      <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5">
+                        <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                        <p className="text-xs text-red-600">{initError}</p>
+                      </div>
+                    )}
+
+                    {initResult?.ok && (
+                      <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                          <p className="text-sm font-medium text-green-700">
+                            {initResult.message}
+                          </p>
+                        </div>
+                        {initResult.seeded_users.length > 0 && (
+                          <p className="mt-2 text-xs text-green-700">
+                            Default accounts created:{" "}
+                            <span className="font-semibold">
+                              {initResult.seeded_users.join(" / ")}
+                            </span>{" "}
+                            (password: <code>password</code>)
+                          </p>
+                        )}
+                        {initResult.api_key && (
+                          <div className="mt-2 text-xs text-green-700">
+                            <p className="font-medium">Default agent API key:</p>
+                            <code className="block mt-1 rounded bg-green-100 px-2 py-1 break-all">
+                              {initResult.api_key}
+                            </code>
+                            <p className="mt-1 text-green-600">
+                              Store this key — it will not be shown again.
+                            </p>
+                          </div>
+                        )}
+                        <ul className="mt-2 space-y-0.5">
+                          {initResult.steps.map((step) => (
+                            <li key={step.name} className="flex items-center gap-1.5 text-xs text-green-700/90">
+                              {step.status === "error" ? (
+                                <XCircle className="h-3 w-3 text-red-500 flex-shrink-0" />
+                              ) : step.status === "skipped" ? (
+                                <span className="h-3 w-3 flex-shrink-0 rounded-full border border-green-400" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
+                              )}
+                              <span>{step.name}</span>
+                              {step.detail && (
+                                <span className="text-green-600/70">— {step.detail}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleInitDatabase}
+                      disabled={initRunning}
+                      className="w-full rounded-xl border border-input bg-card py-2 text-sm font-medium text-foreground transition-all hover:bg-muted hover:border-blue-500/40 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {initRunning ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Initializing...
+                        </span>
+                      ) : dbStatus === "checking" ? (
+                        "Checking database..."
+                      ) : (
+                        "Initialize Database"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
